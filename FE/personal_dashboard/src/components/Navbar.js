@@ -14,6 +14,9 @@ export default function Navbar() {
     <nav style={styles.navbar}>
       <div style={styles.left}>
         <Link style={styles.link} to="/">Dashboard</Link>
+		<Link style={styles.link} to="/weather-center">
+  Weather Center
+</Link>
         <Link style={styles.link} to="/accounts">Accounts</Link>
         <Link style={styles.link} to="/settings">Settings</Link>
 

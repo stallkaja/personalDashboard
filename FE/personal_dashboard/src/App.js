@@ -8,7 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Accounts from "./pages/Accounts";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
-
+import WeatherCenter from "./pages/WeatherCenter";
 import Admin from "./pages/Admin";
 import AdminRoute from "./components/AdminRoute";
 
@@ -29,6 +29,17 @@ function App() {
               </ProtectedRoute>
             }
           />
+		  
+		  
+		  <Route
+            path="/weather-center"
+            element={
+    <ProtectedRoute>
+      <WeatherCenter />
+    </ProtectedRoute>
+  }
+          />
+		  
 
           <Route
             path="/accounts"
