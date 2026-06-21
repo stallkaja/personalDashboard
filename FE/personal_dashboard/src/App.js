@@ -11,6 +11,12 @@ import Login from "./pages/Login";
 import WeatherCenter from "./pages/WeatherCenter";
 import Admin from "./pages/Admin";
 import AdminRoute from "./components/AdminRoute";
+import Calendar from "./pages/Calendar";
+import CalendarDay from "./pages/CalendarDay";
+import Chores from "./pages/Chores";
+import ChoreDay from "./pages/ChoreDay";
+import MealPlanner from "./pages/MealPlanner";
+import MealDay from "./pages/MealDay";
 
 function App() {
   return (
@@ -40,6 +46,60 @@ function App() {
   }
           />
 		  
+
+          <Route
+            path="/calendar"
+            element={
+              <ProtectedRoute>
+                <Calendar />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/calendar/:date"
+            element={
+              <ProtectedRoute>
+                <CalendarDay />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/chores"
+            element={
+              <ProtectedRoute>
+                <Chores />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/chores/:date"
+            element={
+              <ProtectedRoute>
+                <ChoreDay />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/meal-planner"
+            element={
+              <ProtectedRoute>
+                <MealPlanner />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/meal-planner/:date"
+            element={
+              <ProtectedRoute>
+                <MealDay />
+              </ProtectedRoute>
+            }
+          />
 
           <Route
             path="/accounts"

@@ -4,7 +4,7 @@ export default function Dashboard() {
   return (
     <div style={styles.page}>
       <section style={styles.hero}>
-        <h1 style={styles.title}>Weather Station Dashboard</h1>
+        <h1 style={styles.title}>Stallkamp Family Dashboard</h1>
 
         <p style={styles.subtitle}>
           Monitor live weather station data, radar, wind, historical charts,
@@ -14,6 +14,18 @@ export default function Dashboard() {
         <div style={styles.actions}>
           <Link to="/weather-center" style={styles.primaryButton}>
             Open Weather Center
+          </Link>
+
+          <Link to="/calendar" style={styles.secondaryButton}>
+            Calendar
+          </Link>
+
+          <Link to="/chores" style={styles.secondaryButton}>
+            Chores
+          </Link>
+
+          <Link to="/meal-planner" style={styles.secondaryButton}>
+            Meal Planner
           </Link>
 
           <Link to="/accounts" style={styles.secondaryButton}>

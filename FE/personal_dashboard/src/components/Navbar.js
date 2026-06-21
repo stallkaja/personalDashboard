@@ -17,6 +17,9 @@ export default function Navbar() {
 		<Link style={styles.link} to="/weather-center">
   Weather Center
 </Link>
+        <Link style={styles.link} to="/calendar">Calendar</Link>
+        <Link style={styles.link} to="/chores">Chores</Link>
+        <Link style={styles.link} to="/meal-planner">Meals</Link>
         <Link style={styles.link} to="/accounts">Accounts</Link>
         <Link style={styles.link} to="/settings">Settings</Link>
 
