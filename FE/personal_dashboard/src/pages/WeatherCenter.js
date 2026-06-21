@@ -1,356 +1,433 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
 import { useAuth } from "../context/AuthContext";
+import useIsMobile from "../hooks/useIsMobile";
 
 import WindCompass from "../components/WindCompass";
 import CurrentConditions from "../components/CurrentConditions";
 import WeatherRadar from "../components/WeatherRadar";
 
 import {
-	ResponsiveContainer,
-	LineChart,
-	Line,
-	XAxis,
-	YAxis,
-	Tooltip,
-	CartesianGrid
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid
 } from "recharts";
 
-const API_URL = "http://192.168.1.72:8132";
+import theme from "../styles/theme";
+import { API_URL } from "../config";
+
+const MAX_LIVE_POINTS = 1000;
+
+const RANGES = [
+  { label: "24 Hours", hours: 24 },
+  { label: "3 Days", hours: 72 },
+  { label: "7 Days", hours: 168 },
+  { label: "30 Days", hours: 720 }
+];
+
+const METRICS = [
+  { key: "temp", label: "Temperature", stroke: "#ff7300", suffix: "°F" },
+  { key: "humidity", label: "Humidity", stroke: "#38bdf8", suffix: "%" },
+  { key: "wind", label: "Wind Speed", stroke: "#00bfff", suffix: " mph" },
+  { key: "gust", label: "Wind Gust", stroke: "#f472b6", suffix: " mph" },
+  { key: "pressure", label: "Pressure", stroke: "#00ff88", suffix: " inHg" },
+  { key: "rain", label: "Rain", stroke: "#a78bfa", suffix: " in" },
+  { key: "solar", label: "Solar Radiation", stroke: "#facc15", suffix: " W/m²" }
+];
 
 function Card({ title, value }) {
-	return (
-		<div style={styles.card}>
-			<div style={{ opacity: 0.7 }}>{title}</div>
-			<div style={{ fontSize: 28, marginTop: 10 }}>{value}</div>
-		</div>
-	);
+  return (
+    <div style={styles.card}>
+      <div style={{ opacity: 0.7 }}>{title}</div>
+      <div style={{ fontSize: 28, marginTop: 10 }}>{value}</div>
+    </div>
+  );
 }
 
 export default function WeatherCenter() {
-	const { token } = useAuth();
+  const { token } = useAuth();
+  const isMobile = useIsMobile();
 
-	const [latest, setLatest] = useState(null);
-	const [history, setHistory] = useState([]);
-	const [selectedDay, setSelectedDay] = useState(null);
-	const [todayStats, setTodayStats] = useState(null);
-	const [dailyStats, setDailyStats] = useState([]);
-	const [alerts, setAlerts] = useState([]);
+  const [latest, setLatest] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [rangeHours, setRangeHours] = useState(RANGES[0].hours);
+  const [activeMetric, setActiveMetric] = useState(METRICS[0].key);
+  const [todayStats, setTodayStats] = useState(null);
+  const [dailyStats, setDailyStats] = useState([]);
+  const [alerts, setAlerts] = useState([]);
 
-	useEffect(() => {
-		async function loadWeatherCenterData() {
-			try {
-				const latestRes = await fetch(`${API_URL}/latest`);
-				const latestJson = await latestRes.json();
+  const loadHistory = useCallback(async (hours) => {
+    setHistoryLoading(true);
 
-				if (latestJson?.data) {
-					setLatest(latestJson.data);
-				}
+    try {
+      const res = await fetch(`${API_URL}/history?hours=${hours}`);
+      const json = await res.json();
 
-				const historyRes = await fetch(`${API_URL}/history`);
-				const historyJson = await historyRes.json();
+      if (json?.history) {
+        setHistory(json.history);
+      }
+    } catch (err) {
+      console.error("Failed to load weather history:", err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
-				if (historyJson?.history) {
-					setHistory(historyJson.history);
-				}
+  useEffect(() => {
+    async function loadWeatherCenterData() {
+      try {
+        const latestRes = await fetch(`${API_URL}/latest`);
+        const latestJson = await latestRes.json();
 
-				const statsRes = await fetch(`${API_URL}/stats/today`);
-				const statsJson = await statsRes.json();
+        if (latestJson?.data) {
+          setLatest(latestJson.data);
+        }
 
-				if (statsJson?.stats) {
-					setTodayStats(statsJson.stats);
-				}
+        const statsRes = await fetch(`${API_URL}/stats/today`);
+        const statsJson = await statsRes.json();
 
-				const dailyRes = await fetch(`${API_URL}/stats/daily`);
-				const dailyJson = await dailyRes.json();
+        if (statsJson?.stats) {
+          setTodayStats(statsJson.stats);
+        }
 
-				if (dailyJson?.daily) {
-					setDailyStats(dailyJson.daily.reverse());
-				}
+        const dailyRes = await fetch(`${API_URL}/stats/daily`);
+        const dailyJson = await dailyRes.json();
 
-				const alertsRes = await fetch(`${API_URL}/alerts/current`);
-				const alertsJson = await alertsRes.json();
+        if (dailyJson?.daily) {
+          setDailyStats(dailyJson.daily.reverse());
+        }
 
-				if (alertsJson?.alerts) {
-					setAlerts(alertsJson.alerts);
-				}
-			} catch (err) {
-				console.error("Failed to load Weather Center data:", err);
-			}
-		}
+        const alertsRes = await fetch(`${API_URL}/alerts/current`);
+        const alertsJson = await alertsRes.json();
 
-		loadWeatherCenterData();
-	}, []);
+        if (alertsJson?.alerts) {
+          setAlerts(alertsJson.alerts);
+        }
+      } catch (err) {
+        console.error("Failed to load Weather Center data:", err);
+      }
+    }
 
-	useEffect(() => {
-		if (!token) return;
+    loadWeatherCenterData();
+  }, []);
 
-		const socket = io(API_URL, {
-			auth: { token }
-		});
+  useEffect(() => {
+    loadHistory(rangeHours);
+  }, [rangeHours, loadHistory]);
 
-		socket.on("connect", () => {
-			console.log("Weather Center socket connected");
-		});
+  useEffect(() => {
+    if (!token) return;
 
-		socket.on("weather_update", (msg) => {
-			if (!msg || !msg.data) return;
+    const socket = io(API_URL, {
+      auth: { token }
+    });
 
-			setLatest({ ...msg.data });
+    socket.on("weather_update", (msg) => {
+      if (!msg || !msg.data) return;
 
-			setHistory((prev) => [
-				...prev,
-				{
-					timestamp: msg.timestamp,
-					tempf: parseFloat(msg.data.tempf || 0),
-					humidity: parseFloat(msg.data.humidity || 0),
-					windspeedmph: parseFloat(msg.data.windspeedmph || 0),
-					windgustmph: parseFloat(msg.data.windgustmph || 0),
-					winddir: parseFloat(msg.data.winddir || 0),
-					uv: parseFloat(msg.data.uv || 0),
-					baromrelin: parseFloat(msg.data.baromrelin || 0),
-					dailyrainin: parseFloat(msg.data.dailyrainin || 0)
-				}
-			]);
-		});
+      setLatest({ ...msg.data });
 
-		return () => socket.disconnect();
-	}, [token]);
+      setHistory((prev) => {
+        const next = [
+          ...prev,
+          {
+            timestamp: msg.timestamp,
+            tempf: parseFloat(msg.data.tempf || 0),
+            humidity: parseFloat(msg.data.humidity || 0),
+            windspeedmph: parseFloat(msg.data.windspeedmph || 0),
+            windgustmph: parseFloat(msg.data.windgustmph || 0),
+            winddir: parseFloat(msg.data.winddir || 0),
+            uv: parseFloat(msg.data.uv || 0),
+            baromrelin: parseFloat(msg.data.baromrelin || 0),
+            dailyrainin: parseFloat(msg.data.dailyrainin || 0),
+            solarradiation: parseFloat(msg.data.solarradiation || 0)
+          }
+        ];
 
-	if (!latest) {
-		return <div style={styles.loading}>Loading weather center...</div>;
-	}
+        return next.length > MAX_LIVE_POINTS
+          ? next.slice(next.length - MAX_LIVE_POINTS)
+          : next;
+      });
+    });
 
-	const temp = parseFloat(latest.tempf || 0);
-	const humidity = parseFloat(latest.humidity || 0);
-	const wind = parseFloat(latest.windspeedmph || 0);
-	const gust = parseFloat(latest.windgustmph || 0);
-	const pressure = parseFloat(latest.baromrelin || 0);
-	const uv = parseFloat(latest.uv || 0);
-	const rain = parseFloat(latest.dailyrainin || 0);
-	const windDir = parseFloat(latest.winddir || 0);
+    return () => socket.disconnect();
+  }, [token]);
 
-	const groupedHistory = history.reduce((acc, item) => {
-		const day = new Date(item.timestamp).toDateString();
+  const chartData = useMemo(() => {
+    return history.map((r) => ({
+      time: new Date(r.timestamp).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      }),
+      temp: r.tempf,
+      humidity: r.humidity,
+      wind: r.windspeedmph,
+      gust: r.windgustmph,
+      pressure: r.baromrelin,
+      rain: r.dailyrainin,
+      solar: r.solarradiation
+    }));
+  }, [history]);
 
-		if (!acc[day]) acc[day] = [];
-		acc[day].push(item);
+  if (!latest) {
+    return <div style={styles.loading}>Loading weather center...</div>;
+  }
 
-		return acc;
-	}, {});
+  const temp = parseFloat(latest.tempf || 0);
+  const humidity = parseFloat(latest.humidity || 0);
+  const wind = parseFloat(latest.windspeedmph || 0);
+  const gust = parseFloat(latest.windgustmph || 0);
+  const pressure = parseFloat(latest.baromrelin || 0);
+  const uv = parseFloat(latest.uv || 0);
+  const rain = parseFloat(latest.dailyrainin || 0);
+  const windDir = parseFloat(latest.winddir || 0);
+  const solar = parseFloat(latest.solarradiation || 0);
+  const dewPoint = parseFloat(latest.dewpoint ?? temp);
+  const feelsLike = parseFloat(latest.feels_like ?? temp);
 
-	const days = Object.keys(groupedHistory);
+  const activeMetricInfo = METRICS.find((m) => m.key === activeMetric);
 
-	const selectedHistory =
-		selectedDay && groupedHistory[selectedDay]
-			? groupedHistory[selectedDay]
-			: history;
+  return (
+    <div style={{ ...styles.page, padding: isMobile ? 12 : 20 }}>
+      <h1>🌎 Weather Center</h1>
 
-	const selectedChartData = selectedHistory.map((r) => ({
-		time: new Date(r.timestamp).toLocaleTimeString(),
-		temp: parseFloat(r.tempf || 0),
-		humidity: parseFloat(r.humidity || 0),
-		wind: parseFloat(r.windspeedmph || 0),
-		gust: parseFloat(r.windgustmph || 0),
-		pressure: parseFloat(r.baromrelin || 0),
-		rain: parseFloat(r.dailyrainin || 0)
-	}));
+      {alerts.length > 0 && (
+        <div style={styles.alertBox}>
+          <h2>⚠️ Weather Alerts</h2>
 
-	return (
-		<div style={styles.page}>
-			<h1>🌎 Weather Center</h1>
+          {alerts.map((alert, index) => (
+            <div key={index} style={styles.alertItem}>
+              <strong>{alert.type.toUpperCase()}:</strong> {alert.message}
+            </div>
+          ))}
+        </div>
+      )}
 
-			{alerts.length > 0 && (
-				<div style={styles.alertBox}>
-					<h2>⚠️ Weather Alerts</h2>
+      <div style={{ ...styles.heroGrid, gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr" }}>
+        <CurrentConditions
+          temp={temp}
+          feelsLike={feelsLike}
+          dewPoint={dewPoint}
+          humidity={humidity}
+          wind={wind}
+          gust={gust}
+          pressure={pressure}
+          uv={uv}
+          rain={rain}
+          solar={solar}
+        />
 
-					{alerts.map((alert, index) => (
-						<div key={index} style={styles.alertItem}>
-							<strong>{alert.type.toUpperCase()}:</strong> {alert.message}
-						</div>
-					))}
-				</div>
-			)}
+        <WindCompass
+          direction={windDir}
+          speed={wind}
+          gust={gust}
+        />
+      </div>
 
-			<div style={styles.heroGrid}>
-				<CurrentConditions
-					temp={temp}
-					humidity={humidity}
-					wind={wind}
-					gust={gust}
-					pressure={pressure}
-					uv={uv}
-					rain={rain}
-				/>
+      <WeatherRadar />
 
-				<WindCompass
-					direction={windDir}
-					speed={wind}
-					gust={gust}
-				/>
-			</div>
+      {todayStats && (
+        <>
+          <h2>Today's Stats</h2>
 
-			<WeatherRadar />
+          <div style={styles.grid}>
+            <Card title="High Temp" value={`${Number(todayStats.high_temp).toFixed(1)}°F`} />
+            <Card title="Low Temp" value={`${Number(todayStats.low_temp).toFixed(1)}°F`} />
+            <Card title="Avg Temp" value={`${Number(todayStats.avg_temp).toFixed(1)}°F`} />
+            <Card title="Max Gust" value={`${Number(todayStats.max_gust).toFixed(1)} mph`} />
+            <Card title="Rain Total" value={`${Number(todayStats.rain_total).toFixed(3)} in`} />
+            {todayStats.max_solar != null && (
+              <Card title="Max Solar" value={`${Number(todayStats.max_solar).toFixed(0)} W/m²`} />
+            )}
+            {todayStats.high_humidity != null && (
+              <Card
+                title="Humidity Range"
+                value={`${Number(todayStats.low_humidity).toFixed(0)}–${Number(todayStats.high_humidity).toFixed(0)}%`}
+              />
+            )}
+          </div>
+        </>
+      )}
 
-			{todayStats && (
-				<>
-					<h2>Today's Stats</h2>
+      {dailyStats.length > 0 && (
+        <div style={styles.chartBox}>
+          <h2>7-Day Temperature Analytics</h2>
 
-					<div style={styles.grid}>
-						<Card title="High Temp" value={`${Number(todayStats.high_temp).toFixed(1)}°F`} />
-						<Card title="Low Temp" value={`${Number(todayStats.low_temp).toFixed(1)}°F`} />
-						<Card title="Avg Temp" value={`${Number(todayStats.avg_temp).toFixed(1)}°F`} />
-						<Card title="Max Gust" value={`${Number(todayStats.max_gust).toFixed(1)} mph`} />
-						<Card title="Rain Total" value={`${Number(todayStats.rain_total).toFixed(3)} in`} />
-					</div>
-				</>
-			)}
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={dailyStats}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Line type="monotone" dataKey="high_temp" stroke="#ef4444" dot />
+              <Line type="monotone" dataKey="low_temp" stroke="#38bdf8" dot />
+              <Line type="monotone" dataKey="avg_temp" stroke="#facc15" dot />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
-			{dailyStats.length > 0 && (
-				<div style={styles.chartBox}>
-					<h2>7-Day Temperature Analytics</h2>
+      <div style={styles.historyHeader}>
+        <h2>History</h2>
 
-					<ResponsiveContainer width="100%" height={300}>
-						<LineChart data={dailyStats}>
-							<CartesianGrid strokeDasharray="3 3" />
-							<XAxis dataKey="date" />
-							<YAxis />
-							<Tooltip />
-							<Line type="monotone" dataKey="high_temp" stroke="#ef4444" dot />
-							<Line type="monotone" dataKey="low_temp" stroke="#38bdf8" dot />
-							<Line type="monotone" dataKey="avg_temp" stroke="#facc15" dot />
-						</LineChart>
-					</ResponsiveContainer>
-				</div>
-			)}
+        <div style={styles.rangeSelector}>
+          {RANGES.map((range) => (
+            <button
+              key={range.hours}
+              style={rangeHours === range.hours ? styles.dayButtonActive : styles.dayButton}
+              onClick={() => setRangeHours(range.hours)}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
 
-			<div style={styles.historyHeader}>
-				<h2>History</h2>
+        <div style={styles.metricSelector}>
+          {METRICS.map((metric) => (
+            <button
+              key={metric.key}
+              style={activeMetric === metric.key ? styles.metricButtonActive : styles.metricButton}
+              onClick={() => setActiveMetric(metric.key)}
+            >
+              {metric.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-				<div style={styles.daySelector}>
-					<button
-						style={!selectedDay ? styles.dayButtonActive : styles.dayButton}
-						onClick={() => setSelectedDay(null)}
-					>
-						All
-					</button>
+      <div style={styles.chartBox}>
+        <h2>{activeMetricInfo.label} History</h2>
 
-					{days.map((day) => (
-						<button
-							key={day}
-							style={selectedDay === day ? styles.dayButtonActive : styles.dayButton}
-							onClick={() => setSelectedDay(day)}
-						>
-							{day}
-						</button>
-					))}
-				</div>
-			</div>
-
-			<ChartBox title="Temperature History" data={selectedChartData} dataKey="temp" stroke="#ff7300" />
-			<ChartBox title="Humidity History" data={selectedChartData} dataKey="humidity" stroke="#38bdf8" />
-			<ChartBox title="Wind Speed History" data={selectedChartData} dataKey="wind" stroke="#00bfff" />
-			<ChartBox title="Pressure History" data={selectedChartData} dataKey="pressure" stroke="#00ff88" />
-			<ChartBox title="Rain History" data={selectedChartData} dataKey="rain" stroke="#a78bfa" />
-		</div>
-	);
-}
-
-function ChartBox({ title, data, dataKey, stroke }) {
-	return (
-		<div style={styles.chartBox}>
-			<h2>{title}</h2>
-
-			<ResponsiveContainer width="100%" height={300}>
-				<LineChart data={data}>
-					<CartesianGrid strokeDasharray="3 3" />
-					<XAxis dataKey="time" hide />
-					<YAxis />
-					<Tooltip />
-					<Line type="monotone" dataKey={dataKey} stroke={stroke} dot={false} />
-				</LineChart>
-			</ResponsiveContainer>
-		</div>
-	);
+        {historyLoading ? (
+          <div style={styles.chartLoading}>Loading history...</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={350}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="time" minTickGap={40} />
+              <YAxis />
+              <Tooltip formatter={(value) => `${Number(value).toFixed(1)}${activeMetricInfo.suffix}`} />
+              <Line
+                type="monotone"
+                dataKey={activeMetricInfo.key}
+                stroke={activeMetricInfo.stroke}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const styles = {
-	page: {
-		padding: 20,
-		background: "#0f172a",
-		minHeight: "100vh",
-		color: "white"
-	},
-	loading: {
-		padding: 40,
-		background: "#0f172a",
-		minHeight: "100vh",
-		color: "white"
-	},
-	alertBox: {
-		background: "#7f1d1d",
-		border: "1px solid #ef4444",
-		borderRadius: 12,
-		padding: 20,
-		marginBottom: 20
-	},
-	alertItem: {
-		background: "#991b1b",
-		borderRadius: 8,
-		padding: 12,
-		marginTop: 10
-	},
-	heroGrid: {
-		display: "grid",
-		gridTemplateColumns: "2fr 1fr",
-		gap: 20,
-		marginBottom: 30
-	},
-	grid: {
-		display: "grid",
-		gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
-		gap: 15,
-		marginBottom: 30
-	},
-	card: {
-		background: "#1f2937",
-		color: "white",
-		borderRadius: 12,
-		padding: 20,
-		textAlign: "center"
-	},
-	historyHeader: {
-		marginBottom: 20
-	},
-	daySelector: {
-		display: "flex",
-		gap: 10,
-		overflowX: "auto",
-		marginBottom: 20
-	},
-	dayButton: {
-		padding: "8px 12px",
-		borderRadius: 8,
-		border: "none",
-		cursor: "pointer",
-		background: "#334155",
-		color: "white",
-		whiteSpace: "nowrap"
-	},
-	dayButtonActive: {
-		padding: "8px 12px",
-		borderRadius: 8,
-		border: "none",
-		cursor: "pointer",
-		background: "#38bdf8",
-		color: "#0f172a",
-		fontWeight: "bold",
-		whiteSpace: "nowrap"
-	},
-	chartBox: {
-		background: "#1e293b",
-		padding: 20,
-		borderRadius: 12,
-		marginBottom: 20
-	}
+  page: theme.page,
+  loading: theme.loading,
+  alertBox: {
+    background: "#7f1d1d",
+    border: "1px solid #ef4444",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20
+  },
+  alertItem: {
+    background: "#991b1b",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 10
+  },
+  heroGrid: {
+    display: "grid",
+    gridTemplateColumns: "2fr 1fr",
+    gap: 20,
+    marginBottom: 30
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+    gap: 15,
+    marginBottom: 30
+  },
+  card: {
+    background: "#1f2937",
+    color: "white",
+    borderRadius: 12,
+    padding: 20,
+    textAlign: "center"
+  },
+  historyHeader: {
+    marginBottom: 20
+  },
+  rangeSelector: {
+    display: "flex",
+    gap: 10,
+    overflowX: "auto",
+    marginBottom: 12
+  },
+  metricSelector: {
+    display: "flex",
+    gap: 10,
+    overflowX: "auto",
+    flexWrap: "wrap"
+  },
+  dayButton: {
+    padding: "8px 12px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    background: "#334155",
+    color: "white",
+    whiteSpace: "nowrap"
+  },
+  dayButtonActive: {
+    padding: "8px 12px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    background: "#38bdf8",
+    color: "#0f172a",
+    fontWeight: "bold",
+    whiteSpace: "nowrap"
+  },
+  metricButton: {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid #334155",
+    cursor: "pointer",
+    background: "transparent",
+    color: "white",
+    whiteSpace: "nowrap",
+    fontSize: 13
+  },
+  metricButtonActive: {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: "1px solid #38bdf8",
+    cursor: "pointer",
+    background: "#38bdf8",
+    color: "#0f172a",
+    fontWeight: "bold",
+    whiteSpace: "nowrap",
+    fontSize: 13
+  },
+  chartBox: {
+    background: "#1e293b",
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 20
+  },
+  chartLoading: {
+    padding: 60,
+    textAlign: "center",
+    opacity: 0.7
+  }
 };

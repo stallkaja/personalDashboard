@@ -21,8 +21,6 @@ export function AuthProvider({ children }) {
   });
 
   const login = (token, user) => {
-    console.log("AUTH LOGIN USER:", user);
-
     setToken(token);
     setUser(user);
 

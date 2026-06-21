@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-const API_URL = "http://192.168.1.72:8132";
+import theme from "../styles/theme";
+import { API_URL } from "../config";
+
+const RECURRENCE_OPTIONS = [
+  { value: "none", label: "Does not repeat" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" }
+];
 
 export default function CalendarDay() {
   const { token } = useAuth();
@@ -14,6 +22,8 @@ export default function CalendarDay() {
   const [description, setDescription] = useState("");
   const [startTime, setStartTime] = useState(`${date}T09:00`);
   const [endTime, setEndTime] = useState("");
+  const [recurrenceRule, setRecurrenceRule] = useState("none");
+  const [recurrenceEnd, setRecurrenceEnd] = useState("");
   const [error, setError] = useState("");
 
   const loadEvents = async () => {
@@ -52,7 +62,9 @@ export default function CalendarDay() {
           title,
           description,
           start_time: startTime,
-          end_time: endTime || null
+          end_time: endTime || null,
+          recurrence_rule: recurrenceRule,
+          recurrence_end: recurrenceRule !== "none" ? (recurrenceEnd || null) : null
         })
       });
 
@@ -65,15 +77,23 @@ export default function CalendarDay() {
       setDescription("");
       setStartTime(`${date}T09:00`);
       setEndTime("");
+      setRecurrenceRule("none");
+      setRecurrenceEnd("");
       loadEvents();
     } catch {
       setError("Network error creating event.");
     }
   };
 
-  const deleteEvent = async (id) => {
+  const deleteEvent = async (event) => {
+    if (event.is_generated && !window.confirm(
+      "This is a generated occurrence of a repeating event. Deleting will remove the entire series. Continue?"
+    )) {
+      return;
+    }
+
     try {
-      await fetch(`${API_URL}/events/${id}`, {
+      await fetch(`${API_URL}/events/${event.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -133,6 +153,29 @@ export default function CalendarDay() {
           onChange={(e) => setEndTime(e.target.value)}
         />
 
+        <label style={styles.label}>Repeats</label>
+        <select
+          style={styles.input}
+          value={recurrenceRule}
+          onChange={(e) => setRecurrenceRule(e.target.value)}
+        >
+          {RECURRENCE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+
+        {recurrenceRule !== "none" && (
+          <>
+            <label style={styles.label}>Repeat until (optional)</label>
+            <input
+              style={styles.input}
+              type="date"
+              value={recurrenceEnd}
+              onChange={(e) => setRecurrenceEnd(e.target.value)}
+            />
+          </>
+        )}
+
         <button style={styles.button} onClick={addEvent}>
           Add Event
         </button>
@@ -145,9 +188,9 @@ export default function CalendarDay() {
           <p>No events scheduled.</p>
         ) : (
           events.map((ev) => (
-            <div key={ev.id} style={styles.eventRow}>
+            <div key={ev.occurrence_id} style={styles.eventRow}>
               <div>
-                <strong>{ev.title}</strong>
+                <strong>{ev.recurrence_rule !== "none" ? "🔁 " : ""}{ev.title}</strong>
                 <div style={styles.eventTime}>
                   {new Date(ev.start_time).toLocaleTimeString()}
                   {ev.end_time ? ` – ${new Date(ev.end_time).toLocaleTimeString()}` : ""}
@@ -155,7 +198,7 @@ export default function CalendarDay() {
                 {ev.description && <div style={styles.eventDesc}>{ev.description}</div>}
               </div>
 
-              <button style={styles.deleteButton} onClick={() => deleteEvent(ev.id)}>
+              <button style={styles.deleteButton} onClick={() => deleteEvent(ev)}>
                 Delete
               </button>
             </div>
@@ -167,39 +210,11 @@ export default function CalendarDay() {
 }
 
 const styles = {
-  page: {
-    padding: 20,
-    background: "#0f172a",
-    minHeight: "100vh",
-    color: "white"
-  },
-  card: {
-    background: "#1e293b",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20
-  },
-  label: {
-    display: "block",
-    marginBottom: 6,
-    opacity: 0.8,
-    fontSize: 14
-  },
-  input: {
-    display: "block",
-    width: "100%",
-    maxWidth: 400,
-    padding: 10,
-    marginBottom: 12,
-    borderRadius: 8,
-    border: "none"
-  },
-  button: {
-    padding: "10px 15px",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer"
-  },
+  page: theme.page,
+  card: theme.card,
+  label: theme.label,
+  input: theme.input,
+  button: theme.button,
   backButton: {
     padding: "8px 14px",
     border: "none",
@@ -209,20 +224,8 @@ const styles = {
     color: "white",
     marginBottom: 16
   },
-  deleteButton: {
-    padding: "6px 12px",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-    background: "#7f1d1d",
-    color: "white"
-  },
-  error: {
-    background: "#7f1d1d",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
-  },
+  deleteButton: theme.deleteButton,
+  error: theme.error,
   eventRow: {
     display: "flex",
     justifyContent: "space-between",

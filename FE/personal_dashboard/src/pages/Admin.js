@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import theme from "../styles/theme";
 
-const API_URL = "http://192.168.1.72:8132";
+import { API_URL } from "../config";
 
 export default function Admin() {
   const { token, user, logout } = useAuth();
@@ -39,8 +40,6 @@ export default function Admin() {
       });
 
       const data = await res.json();
-      console.log("ADMIN USERS RAW RESPONSE:", data);
-      console.log("ADMIN USERS COUNT:", data.users?.length);
 
       if (!res.ok) {
         setUsers([]);
@@ -296,7 +295,7 @@ export default function Admin() {
 
                   <td style={styles.td}>
                     <button
-                      style={styles.smallButton}
+                      style={{ ...styles.smallButton, marginRight: 8 }}
                       onClick={() => resetPassword(u.id, u.username)}
                     >
                       Reset Password
@@ -328,18 +327,8 @@ export default function Admin() {
 }
 
 const styles = {
-  page: {
-    padding: 20,
-    background: "#0f172a",
-    minHeight: "100vh",
-    color: "white"
-  },
-  card: {
-    background: "#1e293b",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20
-  },
+  page: theme.page,
+  card: theme.card,
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -355,46 +344,19 @@ const styles = {
     padding: 10,
     borderRadius: 8,
     border: "none",
-    minWidth: 180
+    minWidth: 180,
+    fontSize: 15
   },
   smallInput: {
     padding: 6,
     borderRadius: 6,
     border: "none"
   },
-  button: {
-    padding: "10px 14px",
-    borderRadius: 8,
-    border: "none",
-    cursor: "pointer"
-  },
-  smallButton: {
-    marginRight: 8,
-    padding: "6px 10px",
-    borderRadius: 6,
-    border: "none",
-    cursor: "pointer"
-  },
-  dangerButton: {
-    padding: "6px 10px",
-    borderRadius: 6,
-    border: "none",
-    cursor: "pointer",
-    background: "#dc2626",
-    color: "white"
-  },
-  error: {
-    background: "#7f1d1d",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
-  },
-  status: {
-    background: "#166534",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
-  },
+  button: theme.button,
+  smallButton: theme.smallButton,
+  dangerButton: theme.dangerButton,
+  error: theme.error,
+  status: theme.status,
   tableWrap: {
     overflowX: "auto"
   },

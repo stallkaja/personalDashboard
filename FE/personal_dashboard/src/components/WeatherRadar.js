@@ -1,4 +1,6 @@
 import { useState } from "react";
+import useIsMobile from "../hooks/useIsMobile";
+import theme, { colors } from "../styles/theme";
 
 const LAT = 45.5152;
 const LON = -122.6784;
@@ -28,6 +30,7 @@ const layers = {
 
 export default function WeatherRadar() {
   const [active, setActive] = useState("radar");
+  const isMobile = useIsMobile();
 
   const selected = layers[active];
 
@@ -54,7 +57,7 @@ export default function WeatherRadar() {
         title={`Weather ${selected.label}`}
         src={src}
         width="100%"
-        height="600"
+        height={isMobile ? 350 : 600}
         frameBorder="0"
         style={styles.iframe}
       />
@@ -64,10 +67,10 @@ export default function WeatherRadar() {
 
 const styles = {
   card: {
-    background: "#1e293b",
+    background: colors.surface,
     borderRadius: 16,
     padding: 20,
-    color: "white",
+    color: colors.text,
     marginBottom: 20
   },
   header: {
@@ -82,23 +85,8 @@ const styles = {
     gap: 8,
     flexWrap: "wrap"
   },
-  tab: {
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "none",
-    cursor: "pointer",
-    background: "#334155",
-    color: "white"
-  },
-  activeTab: {
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "none",
-    cursor: "pointer",
-    background: "#38bdf8",
-    color: "#0f172a",
-    fontWeight: "bold"
-  },
+  tab: theme.tab,
+  activeTab: theme.tabActive,
   iframe: {
     border: "none",
     borderRadius: 12,

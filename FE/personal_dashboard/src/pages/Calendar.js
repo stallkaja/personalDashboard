@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import useIsMobile from "../hooks/useIsMobile";
 
-const API_URL = "http://192.168.1.72:8132";
+import theme from "../styles/theme";
+import { API_URL } from "../config";
 
 function toDateKey(year, month, day) {
   const m = String(month + 1).padStart(2, "0");
@@ -18,6 +20,7 @@ function eventDateKey(event) {
 export default function Calendar() {
   const { token } = useAuth();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -83,21 +86,26 @@ export default function Calendar() {
   const todayKey = toDateKey(today.getFullYear(), today.getMonth(), today.getDate());
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, padding: isMobile ? 10 : 20 }}>
       <h1>📅 Family Calendar</h1>
 
       {error && <div style={styles.error}>{error}</div>}
 
-      <div style={styles.card}>
+      <div style={{ ...styles.card, padding: isMobile ? 10 : 20 }}>
         <div style={styles.monthHeader}>
           <button style={styles.navButton} onClick={goPrevMonth}>‹</button>
-          <h2 style={styles.monthLabel}>{monthLabel}</h2>
+          <h2 style={{ ...styles.monthLabel, minWidth: isMobile ? 140 : 220, fontSize: isMobile ? 16 : 22 }}>
+            {monthLabel}
+          </h2>
           <button style={styles.navButton} onClick={goNextMonth}>›</button>
         </div>
 
         <div style={styles.weekRow}>
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} style={styles.weekdayLabel}>{d}</div>
+          {(isMobile
+            ? ["S", "M", "T", "W", "T", "F", "S"]
+            : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+          ).map((d, idx) => (
+            <div key={idx} style={styles.weekdayLabel}>{d}</div>
           ))}
         </div>
 
@@ -110,26 +118,32 @@ export default function Calendar() {
             const dateKey = toDateKey(viewYear, viewMonth, day);
             const dayEvents = eventsByDate[dateKey] || [];
             const isToday = dateKey === todayKey;
+            const maxChips = isMobile ? 1 : 3;
 
             return (
               <div
                 key={idx}
                 style={{
                   ...styles.dayCell,
+                  minHeight: isMobile ? 56 : 90,
+                  padding: isMobile ? 3 : 6,
                   ...(isToday ? styles.todayCell : {})
                 }}
                 onClick={() => navigate(`/calendar/${dateKey}`)}
               >
-                <div style={styles.dayNumber}>{day}</div>
+                <div style={{ ...styles.dayNumber, fontSize: isMobile ? 12 : 14 }}>{day}</div>
 
-                {dayEvents.slice(0, 3).map((event) => (
-                  <div key={event.id} style={styles.eventChip}>
-                    {event.title}
+                {dayEvents.slice(0, maxChips).map((event) => (
+                  <div
+                    key={event.occurrence_id}
+                    style={{ ...styles.eventChip, fontSize: isMobile ? 9 : 11 }}
+                  >
+                    {event.recurrence_rule !== "none" ? "🔁 " : ""}{event.title}
                   </div>
                 ))}
 
-                {dayEvents.length > 3 && (
-                  <div style={styles.moreChip}>+{dayEvents.length - 3} more</div>
+                {dayEvents.length > maxChips && (
+                  <div style={styles.moreChip}>+{dayEvents.length - maxChips}</div>
                 )}
               </div>
             );
@@ -141,24 +155,9 @@ export default function Calendar() {
 }
 
 const styles = {
-  page: {
-    padding: 20,
-    background: "#0f172a",
-    minHeight: "100vh",
-    color: "white"
-  },
-  card: {
-    background: "#1e293b",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20
-  },
-  error: {
-    background: "#7f1d1d",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
-  },
+  page: theme.page,
+  card: theme.card,
+  error: theme.error,
   monthHeader: {
     display: "flex",
     alignItems: "center",

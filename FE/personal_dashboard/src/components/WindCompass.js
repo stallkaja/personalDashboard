@@ -1,3 +1,5 @@
+import { colors } from "../styles/theme";
+
 export default function WindCompass({ direction = 0, speed = 0, gust = 0 }) {
   const dir = Number(direction || 0);
   const compassLabel = getCompassDirection(dir);
@@ -46,10 +48,10 @@ function getCompassDirection(degrees) {
 
 const styles = {
   card: {
-    background: "#1e293b",
+    background: colors.surface,
     borderRadius: 16,
     padding: 20,
-    color: "white",
+    color: colors.text,
     textAlign: "center"
   },
   compass: {
@@ -58,8 +60,8 @@ const styles = {
     height: 220,
     margin: "20px auto",
     borderRadius: "50%",
-    border: "3px solid #475569",
-    background: "radial-gradient(circle, #334155 0%, #0f172a 70%)"
+    border: `3px solid ${colors.borderStrong}`,
+    background: `radial-gradient(circle, ${colors.border} 0%, ${colors.background} 70%)`
   },
   needle: {
     position: "absolute",
@@ -67,7 +69,7 @@ const styles = {
     top: "50%",
     width: 5,
     height: 85,
-    background: "#38bdf8",
+    background: colors.primary,
     transformOrigin: "bottom center",
     borderRadius: 999,
     transition: "transform 0.6s ease"

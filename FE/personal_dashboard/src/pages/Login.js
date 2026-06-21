@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { colors } from "../styles/theme";
+import { API_URL } from "../config";
 
 export default function Login() {
   const { login } = useAuth();
@@ -10,7 +12,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
 
   const handleLogin = async () => {
-    const res = await fetch("http://192.168.1.72:8132/login", {
+    const res = await fetch(`${API_URL}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password })
@@ -22,27 +24,70 @@ export default function Login() {
       alert(data.error);
       return;
     }
-	console.log("LOGIN RESPONSE:", data);
+
     login(data.token, data.user);
     navigate("/");
   };
 
   return (
-    <div>
-      <h1>Login</h1>
+    <div style={styles.page}>
+      <div style={styles.card}>
+        <h1>Login</h1>
 
-      <input
-        placeholder="username"
-        onChange={(e) => setUsername(e.target.value)}
-      />
+        <input
+          style={styles.input}
+          placeholder="username"
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+        />
 
-      <input
-        type="password"
-        placeholder="password"
-        onChange={(e) => setPassword(e.target.value)}
-      />
+        <input
+          style={styles.input}
+          type="password"
+          placeholder="password"
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+        />
 
-      <button onClick={handleLogin}>Login</button>
+        <button style={styles.button} onClick={handleLogin}>Login</button>
+      </div>
     </div>
   );
 }
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: colors.background,
+    color: colors.text,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16
+  },
+  card: {
+    background: colors.surface,
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxWidth: 360
+  },
+  input: {
+    display: "block",
+    width: "100%",
+    padding: 12,
+    marginBottom: 12,
+    borderRadius: 8,
+    border: "none",
+    fontSize: 16
+  },
+  button: {
+    width: "100%",
+    padding: 12,
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontSize: 16,
+    fontWeight: "bold"
+  }
+};

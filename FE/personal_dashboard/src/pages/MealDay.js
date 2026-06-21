@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-const API_URL = "http://192.168.1.72:8132";
+import theme from "../styles/theme";
+import { API_URL } from "../config";
+
 const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner"];
 
 export default function MealDay() {
@@ -81,6 +83,21 @@ export default function MealDay() {
     }
   };
 
+  const addToShoppingList = async (meal) => {
+    try {
+      await fetch(`${API_URL}/shopping`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ name: meal.title, meal_id: meal.id })
+      });
+    } catch {
+      setError("Failed to add to shopping list.");
+    }
+  };
+
   const dateLabel = new Date(`${date}T00:00:00`).toLocaleDateString("default", {
     weekday: "long",
     year: "numeric",
@@ -152,9 +169,15 @@ export default function MealDay() {
                       {meal.notes && <div style={styles.mealNotes}>{meal.notes}</div>}
                     </div>
 
-                    <button style={styles.deleteButton} onClick={() => deleteMeal(meal.id)}>
-                      Delete
-                    </button>
+                    <div style={styles.mealActions}>
+                      <button style={styles.shopButton} onClick={() => addToShoppingList(meal)}>
+                        Add to List
+                      </button>
+
+                      <button style={styles.deleteButton} onClick={() => deleteMeal(meal.id)}>
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -167,39 +190,11 @@ export default function MealDay() {
 }
 
 const styles = {
-  page: {
-    padding: 20,
-    background: "#0f172a",
-    minHeight: "100vh",
-    color: "white"
-  },
-  card: {
-    background: "#1e293b",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20
-  },
-  label: {
-    display: "block",
-    marginBottom: 6,
-    opacity: 0.8,
-    fontSize: 14
-  },
-  input: {
-    display: "block",
-    width: "100%",
-    maxWidth: 400,
-    padding: 10,
-    marginBottom: 12,
-    borderRadius: 8,
-    border: "none"
-  },
-  button: {
-    padding: "10px 15px",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer"
-  },
+  page: theme.page,
+  card: theme.card,
+  label: theme.label,
+  input: theme.input,
+  button: theme.button,
   backButton: {
     padding: "8px 14px",
     border: "none",
@@ -209,20 +204,20 @@ const styles = {
     color: "white",
     marginBottom: 16
   },
-  deleteButton: {
+  deleteButton: theme.deleteButton,
+  shopButton: {
     padding: "6px 12px",
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#7f1d1d",
+    background: "#334155",
     color: "white"
   },
-  error: {
-    background: "#7f1d1d",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
+  mealActions: {
+    display: "flex",
+    gap: 8
   },
+  error: theme.error,
   typeGroup: {
     marginBottom: 16
   },

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import theme from "../styles/theme";
 
-const API_URL = "http://192.168.1.72:8132";
+import { API_URL } from "../config";
 
 export default function Accounts() {
   const { user, token, logout } = useAuth();
@@ -157,45 +158,12 @@ export default function Accounts() {
 }
 
 const styles = {
-  page: {
-    padding: 20,
-    background: "#0f172a",
-    minHeight: "100vh",
-    color: "white"
-  },
-  card: {
-    background: "#1e293b",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20
-  },
-  input: {
-    display: "block",
-    width: "100%",
-    maxWidth: 400,
-    padding: 10,
-    marginBottom: 12,
-    borderRadius: 8,
-    border: "none"
-  },
-  button: {
-    padding: "10px 15px",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer"
-  },
-  error: {
-    background: "#7f1d1d",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
-  },
-  status: {
-    background: "#166534",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 15
-  },
+  page: theme.page,
+  card: theme.card,
+  input: theme.input,
+  button: theme.button,
+  error: theme.error,
+  status: theme.status,
   token: {
     display: "block",
     wordBreak: "break-all",
