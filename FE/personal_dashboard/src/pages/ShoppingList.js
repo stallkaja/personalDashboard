@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 export default function ShoppingList() {
@@ -184,8 +184,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#334155",
-    color: "white"
+    background: colors.border,
+    color: colors.text
   },
   deleteButton: theme.deleteButton,
   error: theme.error,
@@ -198,7 +198,7 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    borderTop: "1px solid #334155",
+    borderTop: `1px solid ${colors.border}`,
     padding: "10px 0"
   },
   itemLabel: {

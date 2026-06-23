@@ -2,8 +2,8 @@ import { useState } from "react";
 import useIsMobile from "../hooks/useIsMobile";
 import theme, { colors } from "../styles/theme";
 
-const LAT = 45.5152;
-const LON = -122.6784;
+const DEFAULT_LAT = 45.5152;
+const DEFAULT_LON = -122.6784;
 
 const layers = {
   radar: {
@@ -28,13 +28,13 @@ const layers = {
   }
 };
 
-export default function WeatherRadar() {
+export default function WeatherRadar({ lat = DEFAULT_LAT, lon = DEFAULT_LON }) {
   const [active, setActive] = useState("radar");
   const isMobile = useIsMobile();
 
   const selected = layers[active];
 
-  const src = `https://embed.windy.com/embed2.html?lat=${LAT}&lon=${LON}&zoom=8&level=surface&overlay=${selected.overlay}`;
+  const src = `https://embed.windy.com/embed2.html?lat=${lat}&lon=${lon}&zoom=8&level=surface&overlay=${selected.overlay}`;
 
   return (
     <div style={styles.card}>

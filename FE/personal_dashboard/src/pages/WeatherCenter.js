@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
@@ -17,7 +18,7 @@ import {
   CartesianGrid
 } from "recharts";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 const MAX_LIVE_POINTS = 1000;
@@ -31,7 +32,7 @@ const RANGES = [
 
 const METRICS = [
   { key: "temp", label: "Temperature", stroke: "#ff7300", suffix: "°F" },
-  { key: "humidity", label: "Humidity", stroke: "#38bdf8", suffix: "%" },
+  { key: "humidity", label: "Humidity", stroke: colors.primary, suffix: "%" },
   { key: "wind", label: "Wind Speed", stroke: "#00bfff", suffix: " mph" },
   { key: "gust", label: "Wind Gust", stroke: "#f472b6", suffix: " mph" },
   { key: "pressure", label: "Pressure", stroke: "#00ff88", suffix: " inHg" },
@@ -51,6 +52,7 @@ function Card({ title, value }) {
 export default function WeatherCenter() {
   const { token } = useAuth();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   const [latest, setLatest] = useState(null);
   const [history, setHistory] = useState([]);
@@ -60,6 +62,9 @@ export default function WeatherCenter() {
   const [todayStats, setTodayStats] = useState(null);
   const [dailyStats, setDailyStats] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [records, setRecords] = useState(null);
+  const [appSettings, setAppSettings] = useState(null);
+  const [forecast, setForecast] = useState(null);
 
   const loadHistory = useCallback(async (hours) => {
     setHistoryLoading(true);
@@ -108,6 +113,13 @@ export default function WeatherCenter() {
         if (alertsJson?.alerts) {
           setAlerts(alertsJson.alerts);
         }
+
+        const forecastRes = await fetch(`${API_URL}/forecast`);
+        const forecastJson = await forecastRes.json();
+
+        if (forecastJson?.periods) {
+          setForecast(forecastJson.periods);
+        }
       } catch (err) {
         console.error("Failed to load Weather Center data:", err);
       }
@@ -117,8 +129,30 @@ export default function WeatherCenter() {
   }, []);
 
   useEffect(() => {
+    if (!token) return;
+
+    fetch(`${API_URL}/stats/records`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => res.json())
+      .then((data) => setRecords(data))
+      .catch(() => {});
+  }, [token]);
+
+  useEffect(() => {
     loadHistory(rangeHours);
   }, [rangeHours, loadHistory]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    fetch(`${API_URL}/settings/app`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => res.json())
+      .then((data) => setAppSettings(data))
+      .catch(() => {});
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -231,7 +265,43 @@ export default function WeatherCenter() {
         />
       </div>
 
-      <WeatherRadar />
+      {forecast && forecast.length > 0 && (
+        <div style={styles.chartBox}>
+          <h2>📅 Forecast</h2>
+
+          <div style={styles.forecastRow}>
+            {forecast.slice(0, 8).map((period, index) => (
+              <div
+                key={index}
+                style={styles.forecastCard}
+                onClick={() => navigate(`/forecast/${period.start_time.slice(0, 10)}`)}
+              >
+                <div style={styles.forecastName}>{period.name}</div>
+
+                {period.icon && (
+                  <img src={period.icon} alt={period.short_forecast} style={styles.forecastIcon} />
+                )}
+
+                <div style={styles.forecastTemp}>
+                  {period.temperature}°{period.temperature_unit}
+                </div>
+
+                <div style={styles.forecastShort}>{period.short_forecast}</div>
+
+                {period.probability_of_precipitation != null && period.probability_of_precipitation > 0 && (
+                  <div style={styles.forecastRain}>💧 {period.probability_of_precipitation}%</div>
+                )}
+
+                <div style={styles.forecastWind}>
+                  Wind {period.wind_speed} {period.wind_direction}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <WeatherRadar lat={appSettings?.station_lat} lon={appSettings?.station_lon} />
 
       {todayStats && (
         <>
@@ -256,6 +326,45 @@ export default function WeatherCenter() {
         </>
       )}
 
+      {records && (
+        <div style={styles.chartBox}>
+          <h2>📊 All-Time Records</h2>
+
+          <div style={styles.grid}>
+            {records.hottest && (
+              <Card
+                title="Hottest Reading"
+                value={`${records.hottest.value.toFixed(1)}°F`}
+              />
+            )}
+            {records.coldest && (
+              <Card
+                title="Coldest Reading"
+                value={`${records.coldest.value.toFixed(1)}°F`}
+              />
+            )}
+            {records.windiest_gust && (
+              <Card
+                title="Windiest Gust"
+                value={`${records.windiest_gust.value.toFixed(1)} mph`}
+              />
+            )}
+            {records.rainiest_day && (
+              <Card
+                title="Rainiest Day"
+                value={`${records.rainiest_day.value.toFixed(2)} in`}
+              />
+            )}
+            {records.this_month_avg_temp != null && records.last_month_avg_temp != null && (
+              <Card
+                title="Month vs Last Month"
+                value={`${records.this_month_avg_temp.toFixed(1)}° vs ${records.last_month_avg_temp.toFixed(1)}°`}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       {dailyStats.length > 0 && (
         <div style={styles.chartBox}>
           <h2>7-Day Temperature Analytics</h2>
@@ -267,7 +376,7 @@ export default function WeatherCenter() {
               <YAxis />
               <Tooltip />
               <Line type="monotone" dataKey="high_temp" stroke="#ef4444" dot />
-              <Line type="monotone" dataKey="low_temp" stroke="#38bdf8" dot />
+              <Line type="monotone" dataKey="low_temp" stroke={colors.primary} dot />
               <Line type="monotone" dataKey="avg_temp" stroke="#facc15" dot />
             </LineChart>
           </ResponsiveContainer>
@@ -333,14 +442,14 @@ const styles = {
   page: theme.page,
   loading: theme.loading,
   alertBox: {
-    background: "#7f1d1d",
+    background: colors.danger,
     border: "1px solid #ef4444",
     borderRadius: 12,
     padding: 20,
     marginBottom: 20
   },
   alertItem: {
-    background: "#991b1b",
+    background: colors.dangerStrong,
     borderRadius: 8,
     padding: 12,
     marginTop: 10
@@ -358,8 +467,8 @@ const styles = {
     marginBottom: 30
   },
   card: {
-    background: "#1f2937",
-    color: "white",
+    background: colors.surfaceAlt,
+    color: colors.text,
     borderRadius: 12,
     padding: 20,
     textAlign: "center"
@@ -384,8 +493,8 @@ const styles = {
     borderRadius: 8,
     border: "none",
     cursor: "pointer",
-    background: "#334155",
-    color: "white",
+    background: colors.border,
+    color: colors.text,
     whiteSpace: "nowrap"
   },
   dayButtonActive: {
@@ -393,37 +502,85 @@ const styles = {
     borderRadius: 8,
     border: "none",
     cursor: "pointer",
-    background: "#38bdf8",
-    color: "#0f172a",
+    background: colors.primary,
+    color: colors.background,
     fontWeight: "bold",
     whiteSpace: "nowrap"
   },
   metricButton: {
     padding: "6px 12px",
     borderRadius: 999,
-    border: "1px solid #334155",
+    border: `1px solid ${colors.border}`,
     cursor: "pointer",
     background: "transparent",
-    color: "white",
+    color: colors.text,
     whiteSpace: "nowrap",
     fontSize: 13
   },
   metricButtonActive: {
     padding: "6px 12px",
     borderRadius: 999,
-    border: "1px solid #38bdf8",
+    border: `1px solid ${colors.primary}`,
     cursor: "pointer",
-    background: "#38bdf8",
-    color: "#0f172a",
+    background: colors.primary,
+    color: colors.background,
     fontWeight: "bold",
     whiteSpace: "nowrap",
     fontSize: 13
   },
   chartBox: {
-    background: "#1e293b",
+    background: colors.surface,
     padding: 20,
     borderRadius: 12,
     marginBottom: 20
+  },
+  forecastRow: {
+    display: "flex",
+    gap: 12,
+    overflowX: "auto",
+    paddingBottom: 8
+  },
+  forecastCard: {
+    background: colors.surfaceAlt,
+    borderRadius: 12,
+    padding: 14,
+    minWidth: 130,
+    flexShrink: 0,
+    textAlign: "center",
+    cursor: "pointer",
+    border: `1px solid ${colors.border}`
+  },
+  forecastName: {
+    fontSize: 13,
+    fontWeight: "bold",
+    marginBottom: 8,
+    opacity: 0.85
+  },
+  forecastIcon: {
+    width: 50,
+    height: 50,
+    margin: "0 auto"
+  },
+  forecastTemp: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginTop: 6
+  },
+  forecastShort: {
+    fontSize: 12,
+    opacity: 0.8,
+    marginTop: 4,
+    minHeight: 32
+  },
+  forecastRain: {
+    fontSize: 12,
+    color: colors.primary,
+    marginTop: 4
+  },
+  forecastWind: {
+    fontSize: 11,
+    opacity: 0.6,
+    marginTop: 6
   },
   chartLoading: {
     padding: 60,

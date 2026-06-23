@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 export default function PhotoGallery() {
@@ -96,6 +96,22 @@ export default function PhotoGallery() {
 
   const photos = tab === "mine" ? myPhotos : sharedPhotos;
 
+  const albums = photos.reduce((acc, photo) => {
+    const monthLabel = photo.created_at
+      ? new Date(photo.created_at).toLocaleString("default", { month: "long", year: "numeric" })
+      : "Undated";
+
+    acc[monthLabel] = acc[monthLabel] || [];
+    acc[monthLabel].push(photo);
+    return acc;
+  }, {});
+
+  const albumOrder = Object.keys(albums).sort((a, b) => {
+    const dateA = albums[a][0]?.created_at ? new Date(albums[a][0].created_at) : 0;
+    const dateB = albums[b][0]?.created_at ? new Date(albums[b][0].created_at) : 0;
+    return dateB - dateA;
+  });
+
   return (
     <div style={styles.page}>
       <h1>📷 Family Photo Gallery</h1>
@@ -153,25 +169,31 @@ export default function PhotoGallery() {
               : "No photos have been shared yet."}
           </p>
         ) : (
-          <div style={styles.grid}>
-            {photos.map((photo) => (
-              <div key={photo.id} style={styles.photoCard}>
-                <img
-                  src={`${API_URL}${photo.url}`}
-                  alt={photo.caption || photo.original_name || "Family photo"}
-                  style={styles.photoImg}
-                />
+          albumOrder.map((monthLabel) => (
+            <div key={monthLabel} style={styles.album}>
+              <h3 style={styles.albumHeading}>{monthLabel}</h3>
 
-                {photo.caption && <div style={styles.caption}>{photo.caption}</div>}
+              <div style={styles.grid}>
+                {albums[monthLabel].map((photo) => (
+                  <div key={photo.id} style={styles.photoCard}>
+                    <img
+                      src={`${API_URL}${photo.url}`}
+                      alt={photo.caption || photo.original_name || "Family photo"}
+                      style={styles.photoImg}
+                    />
 
-                {photo.is_mine && (
-                  <button style={styles.deleteButton} onClick={() => deletePhoto(photo.id)}>
-                    Delete
-                  </button>
-                )}
+                    {photo.caption && <div style={styles.caption}>{photo.caption}</div>}
+
+                    {photo.is_mine && (
+                      <button style={styles.deleteButton} onClick={() => deletePhoto(photo.id)}>
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))
         )}
       </div>
     </div>
@@ -186,7 +208,7 @@ const styles = {
   fileInput: {
     display: "block",
     marginBottom: 12,
-    color: "white"
+    color: colors.text
   },
   button: theme.button,
   deleteButton: {
@@ -194,8 +216,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#7f1d1d",
-    color: "white",
+    background: colors.danger,
+    color: colors.text,
     marginTop: 8,
     width: "100%"
   },
@@ -207,16 +229,23 @@ const styles = {
   },
   tab: theme.tab,
   tabActive: theme.tabActive,
+  album: {
+    marginBottom: 24
+  },
+  albumHeading: {
+    marginBottom: 12,
+    opacity: 0.85
+  },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
     gap: 16
   },
   photoCard: {
-    background: "#111827",
+    background: colors.surfaceMuted,
     borderRadius: 12,
     padding: 10,
-    border: "1px solid #334155"
+    border: `1px solid ${colors.border}`
   },
   photoImg: {
     width: "100%",

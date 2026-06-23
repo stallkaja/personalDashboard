@@ -25,7 +25,7 @@ export default function Login() {
       return;
     }
 
-    login(data.token, data.user);
+    login(data.token, data.user, data.refresh_token);
     navigate("/");
   };
 
@@ -50,6 +50,10 @@ export default function Login() {
         />
 
         <button style={styles.button} onClick={handleLogin}>Login</button>
+
+        <button style={styles.linkButton} onClick={() => navigate("/register")}>
+          Create an account
+        </button>
       </div>
     </div>
   );
@@ -89,5 +93,16 @@ const styles = {
     cursor: "pointer",
     fontSize: 16,
     fontWeight: "bold"
+  },
+  linkButton: {
+    width: "100%",
+    padding: 10,
+    marginTop: 10,
+    border: "none",
+    background: "none",
+    color: colors.primary,
+    cursor: "pointer",
+    fontSize: 14,
+    textDecoration: "underline"
   }
 };

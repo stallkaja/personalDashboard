@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+import { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 function toDateKey(date) {
@@ -88,8 +89,8 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    background: "#1d4ed8",
-    color: "white",
+    background: colors.primaryStrong,
+    color: colors.onSolid,
     padding: "10px 20px",
     gap: 16
   },
@@ -105,7 +106,7 @@ const styles = {
   dismissButton: {
     border: "none",
     background: "transparent",
-    color: "white",
+    color: colors.onSolid,
     cursor: "pointer",
     fontSize: 16
   }

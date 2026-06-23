@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 function toDateKey(year, month, day) {
@@ -169,8 +169,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#334155",
-    color: "white",
+    background: colors.border,
+    color: colors.text,
     fontSize: 18
   },
   weekRow: {
@@ -194,15 +194,15 @@ const styles = {
   },
   dayCell: {
     minHeight: 90,
-    background: "#111827",
+    background: colors.surfaceMuted,
     borderRadius: 8,
     padding: 6,
     cursor: "pointer",
-    border: "1px solid #334155",
+    border: `1px solid ${colors.border}`,
     overflow: "hidden"
   },
   todayCell: {
-    border: "1px solid #38bdf8"
+    border: `1px solid ${colors.primary}`
   },
   dayNumber: {
     fontWeight: "bold",

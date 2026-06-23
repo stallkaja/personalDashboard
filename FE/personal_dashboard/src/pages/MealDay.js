@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner"];
@@ -17,6 +17,10 @@ export default function MealDay() {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [expandedMealId, setExpandedMealId] = useState(null);
+  const [ingredientsByMeal, setIngredientsByMeal] = useState({});
+  const [newIngredientName, setNewIngredientName] = useState("");
+  const [newIngredientQty, setNewIngredientQty] = useState("");
 
   const loadMeals = async () => {
     try {
@@ -85,16 +89,68 @@ export default function MealDay() {
 
   const addToShoppingList = async (meal) => {
     try {
-      await fetch(`${API_URL}/shopping`, {
+      await fetch(`${API_URL}/meals/${meal.id}/add-to-shopping-list`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch {
+      setError("Failed to add to shopping list.");
+    }
+  };
+
+  const loadIngredients = async (mealId) => {
+    try {
+      const res = await fetch(`${API_URL}/meals/${mealId}/ingredients`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const data = await res.json();
+      setIngredientsByMeal((prev) => ({ ...prev, [mealId]: data.ingredients || [] }));
+    } catch {
+      setError("Failed to load ingredients.");
+    }
+  };
+
+  const toggleIngredients = (mealId) => {
+    if (expandedMealId === mealId) {
+      setExpandedMealId(null);
+      return;
+    }
+
+    setExpandedMealId(mealId);
+    loadIngredients(mealId);
+  };
+
+  const addIngredient = async (mealId) => {
+    if (!newIngredientName.trim()) return;
+
+    try {
+      await fetch(`${API_URL}/meals/${mealId}/ingredients`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ name: meal.title, meal_id: meal.id })
+        body: JSON.stringify({ name: newIngredientName, quantity: newIngredientQty || null })
       });
+
+      setNewIngredientName("");
+      setNewIngredientQty("");
+      loadIngredients(mealId);
     } catch {
-      setError("Failed to add to shopping list.");
+      setError("Failed to add ingredient.");
+    }
+  };
+
+  const deleteIngredient = async (mealId, ingredientId) => {
+    try {
+      await fetch(`${API_URL}/meal-ingredients/${ingredientId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      loadIngredients(mealId);
+    } catch {
+      setError("Failed to delete ingredient.");
     }
   };
 
@@ -163,21 +219,64 @@ export default function MealDay() {
                 <h3>{type}</h3>
 
                 {typeMeals.map((meal) => (
-                  <div key={meal.id} style={styles.mealRow}>
-                    <div>
-                      <strong>{meal.title}</strong>
-                      {meal.notes && <div style={styles.mealNotes}>{meal.notes}</div>}
+                  <div key={meal.id} style={styles.mealBlock}>
+                    <div style={styles.mealRow}>
+                      <div>
+                        <strong>{meal.title}</strong>
+                        {meal.notes && <div style={styles.mealNotes}>{meal.notes}</div>}
+                      </div>
+
+                      <div style={styles.mealActions}>
+                        <button style={styles.shopButton} onClick={() => toggleIngredients(meal.id)}>
+                          {expandedMealId === meal.id ? "Hide Ingredients" : "Ingredients"}
+                        </button>
+
+                        <button style={styles.shopButton} onClick={() => addToShoppingList(meal)}>
+                          Add to List
+                        </button>
+
+                        <button style={styles.deleteButton} onClick={() => deleteMeal(meal.id)}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
-                    <div style={styles.mealActions}>
-                      <button style={styles.shopButton} onClick={() => addToShoppingList(meal)}>
-                        Add to List
-                      </button>
+                    {expandedMealId === meal.id && (
+                      <div style={styles.ingredientsPanel}>
+                        {(ingredientsByMeal[meal.id] || []).map((ing) => (
+                          <div key={ing.id} style={styles.ingredientRow}>
+                            <span>{ing.name}{ing.quantity ? ` — ${ing.quantity}` : ""}</span>
 
-                      <button style={styles.deleteButton} onClick={() => deleteMeal(meal.id)}>
-                        Delete
-                      </button>
-                    </div>
+                            <button
+                              style={styles.deleteButton}
+                              onClick={() => deleteIngredient(meal.id, ing.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ))}
+
+                        <div style={styles.ingredientForm}>
+                          <input
+                            style={styles.ingredientInput}
+                            placeholder="Ingredient name"
+                            value={newIngredientName}
+                            onChange={(e) => setNewIngredientName(e.target.value)}
+                          />
+
+                          <input
+                            style={styles.ingredientInput}
+                            placeholder="Qty (optional)"
+                            value={newIngredientQty}
+                            onChange={(e) => setNewIngredientQty(e.target.value)}
+                          />
+
+                          <button style={styles.button} onClick={() => addIngredient(meal.id)}>
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -200,8 +299,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#334155",
-    color: "white",
+    background: colors.border,
+    color: colors.text,
     marginBottom: 16
   },
   deleteButton: theme.deleteButton,
@@ -210,8 +309,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#334155",
-    color: "white"
+    background: colors.border,
+    color: colors.text
   },
   mealActions: {
     display: "flex",
@@ -221,12 +320,37 @@ const styles = {
   typeGroup: {
     marginBottom: 16
   },
+  mealBlock: {
+    borderTop: `1px solid ${colors.border}`,
+    padding: "10px 0"
+  },
   mealRow: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    borderTop: "1px solid #334155",
-    padding: "10px 0"
+    alignItems: "flex-start"
+  },
+  ingredientsPanel: {
+    marginTop: 10,
+    paddingLeft: 12,
+    borderLeft: `2px solid ${colors.border}`
+  },
+  ingredientRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "4px 0"
+  },
+  ingredientForm: {
+    display: "flex",
+    gap: 8,
+    marginTop: 8,
+    flexWrap: "wrap"
+  },
+  ingredientInput: {
+    padding: 8,
+    borderRadius: 6,
+    border: "none",
+    flex: "1 1 140px"
   },
   mealNotes: {
     opacity: 0.7,

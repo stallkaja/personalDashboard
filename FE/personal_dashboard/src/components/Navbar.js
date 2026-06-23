@@ -1,22 +1,27 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useThemeMode } from "../context/ThemeContext";
 import useIsMobile from "../hooks/useIsMobile";
+import { colors } from "../styles/theme";
 
 const LINKS = [
   { to: "/", label: "Dashboard" },
+  { to: "/my-stuff", label: "My Stuff" },
   { to: "/weather-center", label: "Weather Center" },
   { to: "/calendar", label: "Calendar" },
   { to: "/chores", label: "Chores" },
   { to: "/meal-planner", label: "Meals" },
   { to: "/shopping-list", label: "Shopping List" },
   { to: "/photo-gallery", label: "Photos" },
+  { to: "/video-library", label: "Videos" },
   { to: "/accounts", label: "Accounts" },
   { to: "/settings", label: "Settings" }
 ];
 
 export default function Navbar() {
   const { user, token, logout } = useAuth();
+  const { themeName, toggleTheme } = useThemeMode();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -49,6 +54,10 @@ export default function Navbar() {
           </button>
 
           <span style={styles.brand}>Family Dashboard</span>
+
+          <button style={styles.hamburger} onClick={toggleTheme} aria-label="Toggle theme">
+            {themeName === "dark" ? "☀️" : "🌙"}
+          </button>
 
           {token ? (
             <button style={styles.button} onClick={handleLogout}>
@@ -97,6 +106,10 @@ export default function Navbar() {
       </div>
 
       <div style={styles.right}>
+        <button style={styles.themeToggle} onClick={toggleTheme} aria-label="Toggle theme">
+          {themeName === "dark" ? "☀️" : "🌙"}
+        </button>
+
         {token ? (
           <>
             <span style={styles.userText}>
@@ -120,8 +133,8 @@ export default function Navbar() {
 
 const styles = {
   navbar: {
-    background: "#111827",
-    color: "white",
+    background: colors.surfaceMuted,
+    color: colors.text,
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -142,7 +155,7 @@ const styles = {
     flexShrink: 0
   },
   link: {
-    color: "white",
+    color: colors.text,
     textDecoration: "none",
     whiteSpace: "nowrap",
     flexShrink: 0
@@ -157,6 +170,13 @@ const styles = {
     cursor: "pointer",
     flexShrink: 0
   },
+  themeToggle: {
+    background: "transparent",
+    border: "none",
+    fontSize: 18,
+    cursor: "pointer",
+    flexShrink: 0
+  },
   mobileHeader: {
     display: "flex",
     alignItems: "center",
@@ -167,7 +187,7 @@ const styles = {
   hamburger: {
     background: "transparent",
     border: "none",
-    color: "white",
+    color: colors.text,
     fontSize: 22,
     cursor: "pointer",
     padding: "4px 8px"
@@ -185,13 +205,13 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     padding: "8px 14px 16px",
-    borderTop: "1px solid #334155"
+    borderTop: `1px solid ${colors.border}`
   },
   mobileLink: {
-    color: "white",
+    color: colors.text,
     textDecoration: "none",
     padding: "12px 4px",
-    borderBottom: "1px solid #1f2937",
+    borderBottom: `1px solid ${colors.surfaceAlt}`,
     fontSize: 16
   }
 };

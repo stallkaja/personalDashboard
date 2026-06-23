@@ -1,19 +1,21 @@
 export const colors = {
-  background: "#0f172a",
-  surface: "#1e293b",
-  surfaceAlt: "#1f2937",
-  surfaceMuted: "#111827",
-  border: "#334155",
-  borderStrong: "#475569",
-  text: "#ffffff",
-  textMuted: "rgba(255,255,255,0.7)",
-  primary: "#38bdf8",
-  primaryText: "#0f172a",
-  danger: "#7f1d1d",
-  dangerStrong: "#991b1b",
-  dangerSolid: "#dc2626",
-  success: "#166534",
-  successSolid: "#16a34a"
+  background: "var(--color-background)",
+  surface: "var(--color-surface)",
+  surfaceAlt: "var(--color-surface-alt)",
+  surfaceMuted: "var(--color-surface-muted)",
+  border: "var(--color-border)",
+  borderStrong: "var(--color-border-strong)",
+  text: "var(--color-text)",
+  textMuted: "var(--color-text-muted)",
+  primary: "var(--color-primary)",
+  primaryText: "var(--color-primary-text)",
+  danger: "var(--color-danger)",
+  dangerStrong: "var(--color-danger-strong)",
+  dangerSolid: "var(--color-danger-solid)",
+  success: "var(--color-success)",
+  successSolid: "var(--color-success-solid)",
+  onSolid: "#ffffff",
+  primaryStrong: "#1d4ed8"
 };
 
 export const theme = {
@@ -65,7 +67,7 @@ export const theme = {
     borderRadius: 8,
     cursor: "pointer",
     background: colors.dangerSolid,
-    color: colors.text,
+    color: colors.onSolid,
     fontSize: 14
   },
   successButton: {
@@ -74,7 +76,7 @@ export const theme = {
     borderRadius: 8,
     cursor: "pointer",
     background: colors.successSolid,
-    color: colors.text,
+    color: colors.onSolid,
     fontSize: 14
   },
   neutralButton: {

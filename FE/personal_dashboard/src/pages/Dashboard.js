@@ -19,8 +19,30 @@ export default function Dashboard() {
   const [todayEvents, setTodayEvents] = useState([]);
   const [todayChores, setTodayChores] = useState([]);
   const [todayMeals, setTodayMeals] = useState([]);
+  const [weather, setWeather] = useState(null);
+  const [dashboardTitle, setDashboardTitle] = useState("Family Dashboard");
 
   const todayKey = toDateKey(new Date());
+
+  useEffect(() => {
+    fetch(`${API_URL}/latest`)
+      .then((res) => res.json())
+      .then((data) => setWeather(data.data || null))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+
+    fetch(`${API_URL}/settings/app`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.dashboard_title) setDashboardTitle(data.dashboard_title);
+      })
+      .catch(() => {});
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -55,7 +77,7 @@ export default function Dashboard() {
     <div style={{ ...styles.page, padding: isMobile ? 12 : 20 }}>
       <section style={{ ...styles.hero, padding: isMobile ? 20 : 40 }}>
         <h1 style={{ ...styles.title, fontSize: isMobile ? 28 : 46 }}>
-          Stallkamp Family Dashboard
+          {dashboardTitle}
         </h1>
 
         <p style={{ ...styles.subtitle, fontSize: isMobile ? 15 : 20 }}>
@@ -93,6 +115,27 @@ export default function Dashboard() {
       <h2 style={styles.todayHeading}>Today</h2>
 
       <div style={styles.grid}>
+        <div style={styles.card}>
+          <h3>🌤️ Weather Now</h3>
+
+          {weather ? (
+            <>
+              <div style={styles.weatherTemp}>{Math.round(weather.tempf)}°F</div>
+              <div style={styles.itemMeta}>
+                Feels like {Math.round(weather.feels_like ?? weather.tempf)}° · {weather.humidity}% humidity
+              </div>
+              <div style={styles.itemMeta}>
+                Wind {Math.round(weather.windspeedmph)} mph
+                {weather.windgustmph ? ` (gust ${Math.round(weather.windgustmph)})` : ""}
+              </div>
+            </>
+          ) : (
+            <p style={styles.cardText}>Weather data unavailable.</p>
+          )}
+
+          <Link to="/weather-center" style={styles.cardLink}>Open Weather Center →</Link>
+        </div>
+
         <div style={styles.card}>
           <h3>📅 Events</h3>
 
@@ -224,6 +267,11 @@ const styles = {
   itemMeta: {
     opacity: 0.6,
     fontSize: 13
+  },
+  weatherTemp: {
+    fontSize: 36,
+    fontWeight: "bold",
+    marginBottom: 6
   },
   cardLink: {
     color: colors.primary,

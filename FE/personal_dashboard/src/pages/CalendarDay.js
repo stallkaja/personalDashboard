@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 const RECURRENCE_OPTIONS = [
@@ -220,8 +220,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#334155",
-    color: "white",
+    background: colors.border,
+    color: colors.text,
     marginBottom: 16
   },
   deleteButton: theme.deleteButton,
@@ -230,7 +230,7 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    borderTop: "1px solid #334155",
+    borderTop: `1px solid ${colors.border}`,
     padding: "12px 0"
   },
   eventTime: {

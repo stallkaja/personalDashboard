@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-import theme from "../styles/theme";
+import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
 
 const RECURRENCE_OPTIONS = [
@@ -22,6 +22,7 @@ export default function ChoreDay() {
   const [assignedTo, setAssignedTo] = useState("");
   const [recurrenceRule, setRecurrenceRule] = useState("none");
   const [recurrenceEnd, setRecurrenceEnd] = useState("");
+  const [rotationNames, setRotationNames] = useState("");
   const [error, setError] = useState("");
 
   const loadChores = async () => {
@@ -49,6 +50,11 @@ export default function ChoreDay() {
       return;
     }
 
+    const rotationMembers = rotationNames
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+
     try {
       const res = await fetch(`${API_URL}/chores`, {
         method: "POST",
@@ -61,7 +67,10 @@ export default function ChoreDay() {
           assigned_to: assignedTo || null,
           due_date: date,
           recurrence_rule: recurrenceRule,
-          recurrence_end: recurrenceRule !== "none" ? (recurrenceEnd || null) : null
+          recurrence_end: recurrenceRule !== "none" ? (recurrenceEnd || null) : null,
+          rotation_members: recurrenceRule !== "none" && rotationMembers.length > 1
+            ? rotationMembers
+            : null
         })
       });
 
@@ -74,6 +83,7 @@ export default function ChoreDay() {
       setAssignedTo("");
       setRecurrenceRule("none");
       setRecurrenceEnd("");
+      setRotationNames("");
       loadChores();
     } catch {
       setError("Network error creating chore.");
@@ -170,6 +180,16 @@ export default function ChoreDay() {
               value={recurrenceEnd}
               onChange={(e) => setRecurrenceEnd(e.target.value)}
             />
+
+            <label style={styles.label}>
+              Rotate between (comma-separated names, optional — overrides "Assigned to" per occurrence)
+            </label>
+            <input
+              style={styles.input}
+              placeholder="e.g. Alice, Bob, Charlie"
+              value={rotationNames}
+              onChange={(e) => setRotationNames(e.target.value)}
+            />
           </>
         )}
 
@@ -195,6 +215,11 @@ export default function ChoreDay() {
               >
                 <strong>{chore.recurrence_rule !== "none" ? "🔁 " : ""}{chore.title}</strong>
                 {chore.assigned_to && <span> — {chore.assigned_to}</span>}
+                {chore.rotation_members && (
+                  <div style={styles.rotationNote}>
+                    Rotating: {chore.rotation_members.join(" → ")}
+                  </div>
+                )}
               </div>
 
               <div style={styles.actions}>
@@ -225,8 +250,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#334155",
-    color: "white",
+    background: colors.border,
+    color: colors.text,
     marginBottom: 16
   },
   toggleButton: {
@@ -234,8 +259,8 @@ const styles = {
     border: "none",
     borderRadius: 8,
     cursor: "pointer",
-    background: "#166534",
-    color: "white"
+    background: colors.success,
+    color: colors.text
   },
   deleteButton: theme.deleteButton,
   error: theme.error,
@@ -243,19 +268,16 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    borderTop: "1px solid #334155",
+    borderTop: `1px solid ${colors.border}`,
     padding: "12px 0"
   },
   choreInfo: {
     flex: 1
   },
-  assigneeBadge: {
-    display: "inline-block",
-    marginLeft: 10,
-    padding: "2px 8px",
-    borderRadius: 12,
+  rotationNote: {
     fontSize: 12,
-    color: "white"
+    opacity: 0.6,
+    marginTop: 2
   },
   actions: {
     display: "flex",
