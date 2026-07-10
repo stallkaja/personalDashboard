@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
+import useUserTimezone from "../hooks/useUserTimezone";
 
 import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
+import { dayKeyInTz, tzAbbrev } from "../utils/time";
 
 function toDateKey(year, month, day) {
   const m = String(month + 1).padStart(2, "0");
@@ -12,15 +14,11 @@ function toDateKey(year, month, day) {
   return `${year}-${m}-${d}`;
 }
 
-function eventDateKey(event) {
-  const d = new Date(event.start_time);
-  return toDateKey(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
 export default function Calendar() {
   const { token } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const tz = useUserTimezone();
 
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -46,7 +44,7 @@ export default function Calendar() {
   }, [token]);
 
   const eventsByDate = events.reduce((acc, event) => {
-    const key = eventDateKey(event);
+    const key = dayKeyInTz(event.start_time, tz);
     acc[key] = acc[key] || [];
     acc[key].push(event);
     return acc;
@@ -83,11 +81,12 @@ export default function Calendar() {
     year: "numeric"
   });
 
-  const todayKey = toDateKey(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayKey = dayKeyInTz(today.toISOString(), tz);
 
   return (
     <div style={{ ...styles.page, padding: isMobile ? 10 : 20 }}>
       <h1>📅 Family Calendar</h1>
+      <p style={styles.tzNote}>Times shown in {tz} ({tzAbbrev(tz)})</p>
 
       {error && <div style={styles.error}>{error}</div>}
 
@@ -158,6 +157,12 @@ const styles = {
   page: theme.page,
   card: theme.card,
   error: theme.error,
+  tzNote: {
+    opacity: 0.6,
+    fontSize: 13,
+    marginTop: -8,
+    marginBottom: 16
+  },
   monthHeader: {
     display: "flex",
     alignItems: "center",

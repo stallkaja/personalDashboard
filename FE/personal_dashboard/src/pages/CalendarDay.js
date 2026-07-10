@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import useUserTimezone from "../hooks/useUserTimezone";
 
 import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
+import { dayKeyInTz, formatTimeInTz, tzAbbrev } from "../utils/time";
 
 const RECURRENCE_OPTIONS = [
   { value: "none", label: "Does not repeat" },
@@ -16,6 +18,7 @@ export default function CalendarDay() {
   const { token } = useAuth();
   const navigate = useNavigate();
   const { date } = useParams();
+  const tz = useUserTimezone();
 
   const [events, setEvents] = useState([]);
   const [title, setTitle] = useState("");
@@ -33,7 +36,7 @@ export default function CalendarDay() {
       });
 
       const data = await res.json();
-      setEvents((data.events || []).filter((e) => e.start_time.startsWith(date)));
+      setEvents((data.events || []).filter((e) => dayKeyInTz(e.start_time, tz) === date));
     } catch {
       setError("Failed to load events.");
     }
@@ -41,7 +44,7 @@ export default function CalendarDay() {
 
   useEffect(() => {
     if (token) loadEvents();
-  }, [token, date]);
+  }, [token, date, tz]);
 
   const addEvent = async () => {
     setError("");
@@ -63,6 +66,7 @@ export default function CalendarDay() {
           description,
           start_time: startTime,
           end_time: endTime || null,
+          timezone: tz,
           recurrence_rule: recurrenceRule,
           recurrence_end: recurrenceRule !== "none" ? (recurrenceEnd || null) : null
         })
@@ -122,6 +126,7 @@ export default function CalendarDay() {
 
       <div style={styles.card}>
         <h2>Add Event</h2>
+        <p style={styles.tzNote}>Times are entered and shown in {tz} ({tzAbbrev(tz)})</p>
 
         <input
           style={styles.input}
@@ -192,8 +197,8 @@ export default function CalendarDay() {
               <div>
                 <strong>{ev.recurrence_rule !== "none" ? "🔁 " : ""}{ev.title}</strong>
                 <div style={styles.eventTime}>
-                  {new Date(ev.start_time).toLocaleTimeString()}
-                  {ev.end_time ? ` – ${new Date(ev.end_time).toLocaleTimeString()}` : ""}
+                  {formatTimeInTz(ev.start_time, tz)}
+                  {ev.end_time ? ` – ${formatTimeInTz(ev.end_time, tz)}` : ""}
                 </div>
                 {ev.description && <div style={styles.eventDesc}>{ev.description}</div>}
               </div>
@@ -226,6 +231,12 @@ const styles = {
   },
   deleteButton: theme.deleteButton,
   error: theme.error,
+  tzNote: {
+    opacity: 0.6,
+    fontSize: 13,
+    marginTop: -4,
+    marginBottom: 12
+  },
   eventRow: {
     display: "flex",
     justifyContent: "space-between",

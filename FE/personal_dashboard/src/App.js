@@ -6,6 +6,8 @@ import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import ReminderBanner from "./components/ReminderBanner";
+import AnnouncementBanner from "./components/AnnouncementBanner";
+import AccentApplier from "./components/AccentApplier";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 import Dashboard from "./pages/Dashboard";
@@ -13,6 +15,8 @@ import Accounts from "./pages/Accounts";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import ChangePassword from "./pages/ChangePassword";
 import WeatherCenter from "./pages/WeatherCenter";
 import ForecastDay from "./pages/ForecastDay";
@@ -23,10 +27,13 @@ import Chores from "./pages/Chores";
 import ChoreDay from "./pages/ChoreDay";
 import MealPlanner from "./pages/MealPlanner";
 import MealDay from "./pages/MealDay";
+import Drinks from "./pages/Drinks";
 import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
 import MyStuff from "./pages/MyStuff";
+import Career from "./pages/Career";
+import Communication from "./pages/Communication";
 
 function App() {
   return (
@@ -34,12 +41,16 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <ErrorBoundary>
+        <AccentApplier />
         <Navbar />
+        <AnnouncementBanner />
         <ReminderBanner />
 
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
 
           <Route
             path="/change-password"
@@ -141,6 +152,15 @@ function App() {
           />
 
           <Route
+            path="/drinks"
+            element={
+              <ProtectedRoute>
+                <Drinks />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/shopping-list"
             element={
               <ProtectedRoute>
@@ -161,8 +181,26 @@ function App() {
           <Route
             path="/video-library"
             element={
-              <ProtectedRoute>
+              <AdminRoute>
                 <VideoLibrary />
+              </AdminRoute>
+            }
+          />
+
+          <Route
+            path="/career"
+            element={
+              <ProtectedRoute>
+                <Career />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/communication"
+            element={
+              <ProtectedRoute>
+                <Communication />
               </ProtectedRoute>
             }
           />

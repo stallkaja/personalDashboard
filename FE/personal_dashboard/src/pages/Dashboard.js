@@ -2,27 +2,25 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
+import useUserTimezone from "../hooks/useUserTimezone";
 import theme, { colors } from "../styles/theme";
 
 import { API_URL } from "../config";
-
-function toDateKey(date) {
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${m}-${d}`;
-}
+import { dayKeyInTz, formatTimeInTz } from "../utils/time";
 
 export default function Dashboard() {
   const { token } = useAuth();
   const isMobile = useIsMobile();
+  const tz = useUserTimezone();
 
   const [todayEvents, setTodayEvents] = useState([]);
   const [todayChores, setTodayChores] = useState([]);
   const [todayMeals, setTodayMeals] = useState([]);
   const [weather, setWeather] = useState(null);
   const [dashboardTitle, setDashboardTitle] = useState("Family Dashboard");
+  const [familyPhoto, setFamilyPhoto] = useState("");
 
-  const todayKey = toDateKey(new Date());
+  const todayKey = dayKeyInTz(new Date().toISOString(), tz);
 
   useEffect(() => {
     fetch(`${API_URL}/latest`)
@@ -40,6 +38,7 @@ export default function Dashboard() {
       .then((res) => res.json())
       .then((data) => {
         if (data.dashboard_title) setDashboardTitle(data.dashboard_title);
+        setFamilyPhoto(data.family_photo || "");
       })
       .catch(() => {});
   }, [token]);
@@ -52,7 +51,9 @@ export default function Dashboard() {
     fetch(`${API_URL}/events`, { headers })
       .then((res) => res.json())
       .then((data) => {
-        const events = (data.events || []).filter((e) => e.start_time.startsWith(todayKey));
+        const events = (data.events || []).filter(
+          (e) => dayKeyInTz(e.start_time, tz) === todayKey
+        );
         events.sort((a, b) => a.start_time.localeCompare(b.start_time));
         setTodayEvents(events);
       })
@@ -75,6 +76,14 @@ export default function Dashboard() {
 
   return (
     <div style={{ ...styles.page, padding: isMobile ? 12 : 20 }}>
+      {familyPhoto && (
+        <img
+          src={`${API_URL}/photos/file/${familyPhoto}`}
+          alt="Family"
+          style={{ ...styles.familyPhoto, height: isMobile ? 160 : 280 }}
+        />
+      )}
+
       <section style={{ ...styles.hero, padding: isMobile ? 20 : 40 }}>
         <h1 style={{ ...styles.title, fontSize: isMobile ? 28 : 46 }}>
           {dashboardTitle}
@@ -146,10 +155,7 @@ export default function Dashboard() {
               <div key={ev.occurrence_id} style={styles.itemRow}>
                 <strong>{ev.title}</strong>
                 <div style={styles.itemMeta}>
-                  {new Date(ev.start_time).toLocaleTimeString([], {
-                    hour: "numeric",
-                    minute: "2-digit"
-                  })}
+                  {formatTimeInTz(ev.start_time, tz)}
                 </div>
               </div>
             ))
@@ -204,6 +210,13 @@ export default function Dashboard() {
 
 const styles = {
   page: theme.page,
+  familyPhoto: {
+    width: "100%",
+    objectFit: "cover",
+    borderRadius: 20,
+    marginBottom: 20,
+    display: "block"
+  },
   hero: {
     background: colors.surface,
     borderRadius: 20,

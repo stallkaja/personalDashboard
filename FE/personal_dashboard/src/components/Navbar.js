@@ -12,9 +12,11 @@ const LINKS = [
   { to: "/calendar", label: "Calendar" },
   { to: "/chores", label: "Chores" },
   { to: "/meal-planner", label: "Meals" },
+  { to: "/drinks", label: "Drinks" },
   { to: "/shopping-list", label: "Shopping List" },
   { to: "/photo-gallery", label: "Photos" },
-  { to: "/video-library", label: "Videos" },
+  { to: "/communication", label: "Messages" },
+  { to: "/career", label: "Job Search" },
   { to: "/accounts", label: "Accounts" },
   { to: "/settings", label: "Settings" }
 ];
@@ -28,7 +30,9 @@ export default function Navbar() {
 
   const links = [
     ...LINKS,
-    ...(user?.role === "admin" ? [{ to: "/admin", label: "Admin" }] : [])
+    ...(user?.role === "admin"
+      ? [{ to: "/video-library", label: "Videos" }, { to: "/admin", label: "Admin" }]
+      : [])
   ];
 
   const handleLogout = () => {

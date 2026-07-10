@@ -1,19 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import useUserTimezone from "../hooks/useUserTimezone";
 
 import { colors } from "../styles/theme";
 import { API_URL } from "../config";
-
-function toDateKey(date) {
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${m}-${d}`;
-}
+import { dayKeyInTz, formatTimeInTz } from "../utils/time";
 
 export default function ReminderBanner() {
   const { token } = useAuth();
   const navigate = useNavigate();
+  const tz = useUserTimezone();
 
   const [reminders, setReminders] = useState([]);
   const [dismissed, setDismissed] = useState(false);
@@ -23,7 +20,7 @@ export default function ReminderBanner() {
 
     const headers = { Authorization: `Bearer ${token}` };
     const now = new Date();
-    const todayKey = toDateKey(now);
+    const todayKey = dayKeyInTz(now.toISOString(), tz);
     const soonCutoff = new Date(now.getTime() + 60 * 60 * 1000);
 
     Promise.all([
@@ -43,10 +40,7 @@ export default function ReminderBanner() {
         const items = [
           ...upcomingEvents.map((e) => ({
             key: `event-${e.occurrence_id}`,
-            text: `📅 "${e.title}" starts at ${new Date(e.start_time).toLocaleTimeString([], {
-              hour: "numeric",
-              minute: "2-digit"
-            })}`,
+            text: `📅 "${e.title}" starts at ${formatTimeInTz(e.start_time, tz)}`,
             link: "/calendar"
           })),
           ...dueChores.map((c) => ({
@@ -59,7 +53,7 @@ export default function ReminderBanner() {
         setReminders(items);
       })
       .catch(() => {});
-  }, [token]);
+  }, [token, tz]);
 
   if (dismissed || reminders.length === 0 || !token) return null;
 

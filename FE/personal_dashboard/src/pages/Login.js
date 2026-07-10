@@ -8,14 +8,14 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const handleLogin = async () => {
     const res = await fetch(`${API_URL}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ email, password })
     });
 
     const data = await res.json();
@@ -36,8 +36,9 @@ export default function Login() {
 
         <input
           style={styles.input}
-          placeholder="username"
-          onChange={(e) => setUsername(e.target.value)}
+          type="email"
+          placeholder="email"
+          onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleLogin()}
         />
 
@@ -50,6 +51,10 @@ export default function Login() {
         />
 
         <button style={styles.button} onClick={handleLogin}>Login</button>
+
+        <button style={styles.linkButton} onClick={() => navigate("/forgot-password")}>
+          Forgot password?
+        </button>
 
         <button style={styles.linkButton} onClick={() => navigate("/register")}>
           Create an account

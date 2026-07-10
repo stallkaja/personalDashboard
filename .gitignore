@@ -1,0 +1,9 @@
+logs/
+uploads/
+node_modules/
+FE/personal_dashboard/build/
+FE/personal_dashboard/node_modules/
+__pycache__/
+*.pyc
+vapid_private_key.pem
+secrets.json

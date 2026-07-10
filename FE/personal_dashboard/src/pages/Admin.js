@@ -15,6 +15,7 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
 
   const [newUsername, setNewUsername] = useState("");
+  const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("user");
 
@@ -72,7 +73,12 @@ export default function Admin() {
 
   const createUser = async () => {
     if (!newUsername.trim() || !newPassword.trim()) {
-      setError("Username and password are required");
+      setError("Name and password are required");
+      return;
+    }
+
+    if (!newEmail.trim() || !newEmail.includes("@")) {
+      setError("A valid email address is required");
       return;
     }
 
@@ -85,6 +91,7 @@ export default function Admin() {
         headers: authHeaders,
         body: JSON.stringify({
           username: newUsername.trim(),
+          email: newEmail.trim(),
           password: newPassword,
           role: newRole
         })
@@ -99,6 +106,7 @@ export default function Admin() {
 
       setStatus("User created successfully");
       setNewUsername("");
+      setNewEmail("");
       setNewPassword("");
       setNewRole("user");
       loadUsers();
@@ -374,9 +382,17 @@ export default function Admin() {
         <div style={styles.formRow}>
           <input
             style={styles.input}
-            placeholder="Username"
+            placeholder="Display name"
             value={newUsername}
             onChange={(e) => setNewUsername(e.target.value)}
+          />
+
+          <input
+            style={styles.input}
+            type="email"
+            placeholder="Email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
           />
 
           <input
@@ -424,6 +440,7 @@ export default function Admin() {
                   <strong>{u.username}</strong>
                   <span style={styles.statusBadge}>{u.status || "approved"}</span>
                 </div>
+                <div style={styles.userCardMeta}>{u.email || "no email"}</div>
                 <div style={styles.userCardMeta}>ID: {u.id} · {u.created_at ? new Date(u.created_at).toLocaleDateString() : "N/A"}</div>
                 <div style={{ marginTop: 8 }}>
                   <select
@@ -456,7 +473,8 @@ export default function Admin() {
               <thead>
                 <tr>
                   <th style={styles.th}>ID</th>
-                  <th style={styles.th}>Username</th>
+                  <th style={styles.th}>Name</th>
+                  <th style={styles.th}>Email</th>
                   <th style={styles.th}>Role</th>
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Created</th>
@@ -468,6 +486,7 @@ export default function Admin() {
                   <tr key={u.id}>
                     <td style={styles.td}>{u.id}</td>
                     <td style={styles.td}>{u.username}</td>
+                    <td style={styles.td}>{u.email || "—"}</td>
                     <td style={styles.td}>
                       <select value={u.role} onChange={(e) => updateRole(u.id, e.target.value)} style={styles.smallInput}>
                         <option value="user">user</option>

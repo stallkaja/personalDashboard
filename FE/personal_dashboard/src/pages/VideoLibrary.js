@@ -12,10 +12,11 @@ function formatFileSize(bytes) {
 }
 
 export default function VideoLibrary() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const fileInputRef = useRef(null);
 
-  const [tab, setTab] = useState("local");
+  const [tab, setTab] = useState(isAdmin ? "local" : "mine");
   const [myVideos, setMyVideos] = useState([]);
   const [sharedVideos, setSharedVideos] = useState([]);
   const [caption, setCaption] = useState("");
@@ -57,11 +58,11 @@ export default function VideoLibrary() {
   };
 
   useEffect(() => {
-    if (token && tab === "local") {
+    if (token && tab === "local" && isAdmin) {
       loadLocalVideos(currentPath);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, tab, currentPath]);
+  }, [token, tab, currentPath, isAdmin]);
 
   const breadcrumbs = currentPath
     ? currentPath.split("/").reduce((acc, segment) => {
@@ -236,12 +237,14 @@ export default function VideoLibrary() {
             Shared Videos
           </button>
 
-          <button
-            style={tab === "local" ? styles.tabActive : styles.tab}
-            onClick={() => setTab("local")}
-          >
-            Local Folder
-          </button>
+          {isAdmin && (
+            <button
+              style={tab === "local" ? styles.tabActive : styles.tab}
+              onClick={() => setTab("local")}
+            >
+              Local Folder
+            </button>
+          )}
         </div>
 
         {tab === "local" ? (

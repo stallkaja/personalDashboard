@@ -5,6 +5,8 @@ import { useAuth } from "../context/AuthContext";
 import { useThemeMode } from "../context/ThemeContext";
 import usePushNotifications from "../hooks/usePushNotifications";
 import { API_URL } from "../config";
+import { allTimezones, browserTimezone, tzAbbrev } from "../utils/time";
+import { applyAccent } from "../utils/accent";
 
 export default function Settings() {
   const { token, user, logout } = useAuth();
@@ -81,6 +83,38 @@ export default function Settings() {
     } catch {
       setAppError("Network error saving settings.");
     }
+  };
+
+  const uploadFamilyPhoto = async (file) => {
+    if (!file) return;
+    setAppStatus("");
+    setAppError("");
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch(`${API_URL}/settings/family-photo`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+      if (!res.ok) { setAppError("Failed to upload family photo."); return; }
+      const data = await res.json();
+      setAppSettings((prev) => ({ ...prev, family_photo: data.family_photo }));
+      setAppStatus("Family photo updated.");
+    } catch {
+      setAppError("Network error uploading photo.");
+    }
+  };
+
+  const removeFamilyPhoto = () => {
+    const next = { ...appSettings, family_photo: "" };
+    setAppSettings(next);
+    // persist immediately via the app-settings PUT
+    fetch(`${API_URL}/settings/app`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(next)
+    }).then(() => setAppStatus("Family photo removed.")).catch(() => {});
   };
 
   const clearLocalData = () => {
@@ -160,6 +194,40 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      {userSettings && (
+        <div style={theme.card}>
+          <h2>Calendar & Time</h2>
+          <p style={styles.muted}>
+            Choose the timezone your calendar and event times are shown in.
+            Events you create are recorded in this zone and converted for anyone
+            viewing in a different one.
+          </p>
+
+          <label style={theme.label}>Timezone</label>
+          <select
+            style={theme.input}
+            value={userSettings.timezone || ""}
+            onChange={(e) =>
+              saveUserSettings({ ...userSettings, timezone: e.target.value || null })
+            }
+          >
+            <option value="">
+              Auto-detect ({browserTimezone()})
+            </option>
+            {allTimezones().map((zone) => (
+              <option key={zone} value={zone}>{zone}</option>
+            ))}
+          </select>
+
+          <p style={styles.savedNote}>
+            Currently showing times in {userSettings.timezone || browserTimezone()}{" "}
+            ({tzAbbrev(userSettings.timezone || browserTimezone())})
+          </p>
+
+          {userStatus && <p style={styles.savedNote}>{userStatus}</p>}
+        </div>
+      )}
 
       {isAdmin && appSettings && (
         <div style={theme.card}>
@@ -252,6 +320,62 @@ export default function Settings() {
             value={appSettings.local_video_folder}
             onChange={(e) => setAppSettings({ ...appSettings, local_video_folder: e.target.value })}
             placeholder="D:\Videos"
+          />
+
+          <h3 style={styles.subheading}>Accent Color</h3>
+          <p style={styles.muted}>Sets the app's highlight color (buttons, links) for everyone.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <input
+              type="color"
+              value={appSettings.accent_color || "#38bdf8"}
+              onChange={(e) => {
+                setAppSettings({ ...appSettings, accent_color: e.target.value });
+                applyAccent(e.target.value);
+              }}
+              style={{ width: 48, height: 36, border: "none", background: "none", cursor: "pointer" }}
+            />
+            <span style={styles.muted}>{appSettings.accent_color || "theme default"}</span>
+            <button
+              style={theme.neutralButton}
+              onClick={() => {
+                setAppSettings({ ...appSettings, accent_color: "" });
+                applyAccent("");
+              }}
+            >
+              Reset to default
+            </button>
+          </div>
+
+          <h3 style={styles.subheading}>Family Photo</h3>
+          <p style={styles.muted}>Shown at the top of the dashboard for everyone.</p>
+          {appSettings.family_photo && (
+            <img
+              src={`${API_URL}/photos/file/${appSettings.family_photo}`}
+              alt="Family"
+              style={{ width: "100%", maxWidth: 360, borderRadius: 12, marginBottom: 10, display: "block" }}
+            />
+          )}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => uploadFamilyPhoto(e.target.files?.[0])}
+            style={{ marginBottom: 10, display: "block" }}
+          />
+          {appSettings.family_photo && (
+            <button style={theme.neutralButton} onClick={removeFamilyPhoto}>Remove photo</button>
+          )}
+
+          <h3 style={styles.subheading}>Special Note (banner)</h3>
+          <p style={styles.muted}>
+            A highlighted note shown to everyone at the top of the app (e.g. "Remember dinner at 5 tonight").
+            Leave blank to hide it.
+          </p>
+          <textarea
+            style={{ ...theme.input, minHeight: 60, fontFamily: "inherit" }}
+            value={appSettings.announcement || ""}
+            onChange={(e) => setAppSettings({ ...appSettings, announcement: e.target.value })}
+            placeholder="Remember dinner at 5 tonight"
+            maxLength={2000}
           />
 
           <button style={theme.button} onClick={saveAppSettings}>

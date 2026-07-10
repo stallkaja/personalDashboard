@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.sdashboard.twa",
+      "sha256_cert_fingerprints": [
+        "DC:F5:B4:B7:19:D1:3C:A1:DD:2F:02:7D:7E:D7:31:D1:1A:C0:2F:78:73:9E:F9:A8:E4:64:F6:65:28:E6:72:89"
+      ]
+    }
+  }
+]

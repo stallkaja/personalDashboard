@@ -10,6 +10,7 @@ export default function Register() {
   const hasInvite = !!inviteToken;
 
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -21,7 +22,12 @@ export default function Register() {
     setError("");
 
     if (!username.trim() || !password) {
-      setError("Username and password are required.");
+      setError("Name and password are required.");
+      return;
+    }
+
+    if (!hasInvite && (!email.trim() || !email.includes("@"))) {
+      setError("A valid email address is required.");
       return;
     }
 
@@ -35,6 +41,7 @@ export default function Register() {
     try {
       const body = { username: username.trim(), password };
       if (inviteToken) body.invite_token = inviteToken;
+      if (!hasInvite) body.email = email.trim();
 
       const res = await fetch(`${API_URL}/register`, {
         method: "POST",
@@ -90,11 +97,22 @@ export default function Register() {
 
         <input
           style={styles.input}
-          placeholder="username"
+          placeholder="your name"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleRegister()}
         />
+
+        {!hasInvite && (
+          <input
+            style={styles.input}
+            type="email"
+            placeholder="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleRegister()}
+          />
+        )}
 
         <input
           style={styles.input}
