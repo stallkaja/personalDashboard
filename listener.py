@@ -233,6 +233,32 @@ def send_push_to_all(payload, notify_column=None):
             db2.close()
 
 
+def send_push_to_user(user_id, payload):
+    """Send a web-push notification to every subscription belonging to one user."""
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=%s",
+        (user_id,)
+    )
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    for sub_id, endpoint, p256dh, auth in rows:
+        ok = send_push_to_subscription(
+            {"endpoint": endpoint, "p256dh": p256dh, "auth": auth}, payload
+        )
+
+        if not ok:
+            db2 = get_db()
+            cursor2 = db2.cursor()
+            cursor2.execute("DELETE FROM push_subscriptions WHERE id=%s", (sub_id,))
+            db2.commit()
+            cursor2.close()
+            db2.close()
+
+
 def maybe_send_alert_push(alert_type, message):
     now = datetime.now().timestamp()
     last_sent = _last_alert_sent.get(alert_type, 0)
@@ -299,6 +325,8 @@ def ensure_feature_tables():
     """)
 
     # Family message board ("Communication" tab): a shared feed of short notes.
+    # Legacy — superseded by direct_messages (internal email). Kept so old data
+    # is not lost; no UI writes to it anymore.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -306,6 +334,30 @@ def ensure_feature_tables():
             author VARCHAR(255),
             body TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Internal email ("Communication" tab): person-to-person directed messages.
+    # Each row is one message from sender to recipient. Soft-delete is per-side
+    # (deleted_by_sender / deleted_by_recipient) so each party manages their own
+    # copy independently; the row is hard-deleted only once both sides remove it.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS direct_messages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            sender_id INT,
+            sender_name VARCHAR(255),
+            recipient_id INT,
+            recipient_name VARCHAR(255),
+            subject VARCHAR(255),
+            body TEXT NOT NULL,
+            parent_id INT DEFAULT NULL,
+            is_read BOOLEAN DEFAULT FALSE,
+            read_at TIMESTAMP NULL DEFAULT NULL,
+            deleted_by_sender BOOLEAN DEFAULT FALSE,
+            deleted_by_recipient BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_dm_recipient (recipient_id),
+            INDEX idx_dm_sender (sender_id)
         )
     """)
 
@@ -4109,6 +4161,304 @@ def delete_message(message_id):
         return {"error": "You can only delete your own messages"}, 403
 
     cursor.execute("DELETE FROM messages WHERE id=%s", (message_id,))
+    db.commit()
+    cursor.close()
+    db.close()
+    return {"message": "Message deleted"}
+
+
+# --- Internal email (direct messages) -------------------------------------
+
+@app.route("/users", methods=["GET"])
+@jwt_required()
+def list_users_for_messaging():
+    """Approved users, for the compose recipient picker. Any signed-in user."""
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT id, username
+        FROM users
+        WHERE status = 'approved' OR status IS NULL
+        ORDER BY username ASC
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {
+        "users": [
+            {"id": r[0], "username": r[1], "is_me": r[0] == user_id}
+            for r in rows
+        ]
+    }
+
+
+def _dm_to_dict(r, me):
+    """Row order: id, sender_id, sender_name, recipient_id, recipient_name,
+    subject, body, parent_id, is_read, read_at, created_at."""
+    return {
+        "id": r[0],
+        "sender_id": r[1],
+        "sender_name": r[2] or "Unknown",
+        "recipient_id": r[3],
+        "recipient_name": r[4] or "Unknown",
+        "subject": r[5] or "(no subject)",
+        "body": r[6],
+        "parent_id": r[7],
+        "is_read": bool(r[8]),
+        "read_at": r[9].isoformat() if r[9] else None,
+        "created_at": r[10].isoformat() if r[10] else None,
+        "is_mine": r[1] == me,
+    }
+
+
+DM_COLUMNS = """
+    id, sender_id, sender_name, recipient_id, recipient_name,
+    subject, body, parent_id, is_read, read_at, created_at
+"""
+
+
+@app.route("/direct-messages", methods=["GET"])
+@jwt_required()
+def list_direct_messages():
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+    box = (request.args.get("box") or "inbox").lower()
+
+    db = get_db()
+    cursor = db.cursor()
+
+    if box == "sent":
+        cursor.execute(f"""
+            SELECT {DM_COLUMNS} FROM direct_messages
+            WHERE sender_id = %s AND deleted_by_sender = FALSE
+            ORDER BY created_at DESC, id DESC
+            LIMIT 300
+        """, (user_id,))
+    else:
+        cursor.execute(f"""
+            SELECT {DM_COLUMNS} FROM direct_messages
+            WHERE recipient_id = %s AND deleted_by_recipient = FALSE
+            ORDER BY created_at DESC, id DESC
+            LIMIT 300
+        """, (user_id,))
+
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {"messages": [_dm_to_dict(r, user_id) for r in rows], "box": box}
+
+
+@app.route("/direct-messages/unread-count", methods=["GET"])
+@jwt_required()
+def direct_messages_unread_count():
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) FROM direct_messages
+        WHERE recipient_id = %s AND is_read = FALSE AND deleted_by_recipient = FALSE
+    """, (user_id,))
+    count = cursor.fetchone()[0]
+    cursor.close()
+    db.close()
+
+    return {"unread": count}
+
+
+@app.route("/direct-messages/<int:message_id>", methods=["GET"])
+@jwt_required()
+def get_direct_message(message_id):
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(f"""
+        SELECT {DM_COLUMNS}, deleted_by_sender, deleted_by_recipient
+        FROM direct_messages WHERE id = %s
+    """, (message_id,))
+    r = cursor.fetchone()
+
+    if not r:
+        cursor.close()
+        db.close()
+        return {"error": "Message not found"}, 404
+
+    sender_id, recipient_id = r[1], r[3]
+    deleted_by_sender, deleted_by_recipient = r[11], r[12]
+
+    is_recipient = recipient_id == user_id
+    is_sender = sender_id == user_id
+
+    # Only the two parties may read it, and not once they've deleted their copy.
+    if not (is_recipient or is_sender) \
+            or (is_recipient and deleted_by_recipient) \
+            or (is_sender and deleted_by_sender):
+        cursor.close()
+        db.close()
+        return {"error": "Message not found"}, 404
+
+    # Opening an inbox message marks it read.
+    if is_recipient and not r[8]:
+        cursor.execute(
+            "UPDATE direct_messages SET is_read = TRUE, read_at = NOW() WHERE id = %s",
+            (message_id,)
+        )
+        db.commit()
+
+    cursor.close()
+    db.close()
+
+    result = _dm_to_dict(r, user_id)
+    if is_recipient:
+        result["is_read"] = True
+    return {"message": result}
+
+
+@app.route("/direct-messages", methods=["POST"])
+@jwt_required()
+def send_direct_message():
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    data = request.json or {}
+    recipient_id = data.get("recipient_id")
+    subject = (data.get("subject") or "").strip()
+    body = (data.get("body") or "").strip()
+    parent_id = data.get("parent_id")
+
+    if not recipient_id:
+        return {"error": "A recipient is required"}, 400
+    if not body:
+        return {"error": "Message body cannot be empty"}, 400
+    if len(subject) > 255:
+        return {"error": "Subject is too long (255 char max)"}, 400
+    if len(body) > 5000:
+        return {"error": "Message is too long (5000 char max)"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+
+    # Resolve names straight from the users table so they're always accurate.
+    cursor.execute("SELECT id, username, status FROM users WHERE id = %s", (recipient_id,))
+    recipient = cursor.fetchone()
+    if not recipient or (recipient[2] not in (None, "approved")):
+        cursor.close()
+        db.close()
+        return {"error": "Recipient not found"}, 400
+
+    cursor.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+    sender_row = cursor.fetchone()
+    sender_name = sender_row[0] if sender_row else (claims.get("username") or "Unknown")
+    recipient_name = recipient[1]
+
+    cursor.execute("""
+        INSERT INTO direct_messages
+            (sender_id, sender_name, recipient_id, recipient_name, subject, body, parent_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """, (user_id, sender_name, recipient_id, recipient_name,
+          subject or None, body, parent_id or None))
+    db.commit()
+    new_id = cursor.lastrowid
+    cursor.close()
+    db.close()
+
+    # Best-effort push notification to the recipient; never fail the send on it.
+    try:
+        send_push_to_user(recipient_id, {
+            "title": f"New message from {sender_name}",
+            "body": (subject or body)[:120],
+            "url": "/communication"
+        })
+    except Exception:
+        pass
+
+    return {"id": new_id}, 201
+
+
+@app.route("/direct-messages/<int:message_id>/read", methods=["PUT"])
+@jwt_required()
+def set_direct_message_read(message_id):
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+    data = request.json or {}
+    read = data.get("read", True)
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT recipient_id FROM direct_messages WHERE id = %s", (message_id,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.close()
+        db.close()
+        return {"error": "Message not found"}, 404
+    if row[0] != user_id:
+        cursor.close()
+        db.close()
+        return {"error": "Only the recipient can change read state"}, 403
+
+    if read:
+        cursor.execute(
+            "UPDATE direct_messages SET is_read = TRUE, read_at = NOW() WHERE id = %s",
+            (message_id,)
+        )
+    else:
+        cursor.execute(
+            "UPDATE direct_messages SET is_read = FALSE, read_at = NULL WHERE id = %s",
+            (message_id,)
+        )
+    db.commit()
+    cursor.close()
+    db.close()
+    return {"message": "Updated"}
+
+
+@app.route("/direct-messages/<int:message_id>", methods=["DELETE"])
+@jwt_required()
+def delete_direct_message(message_id):
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT sender_id, recipient_id, deleted_by_sender, deleted_by_recipient "
+        "FROM direct_messages WHERE id = %s",
+        (message_id,)
+    )
+    row = cursor.fetchone()
+    if not row:
+        cursor.close()
+        db.close()
+        return {"error": "Message not found"}, 404
+
+    sender_id, recipient_id, del_sender, del_recipient = row
+    if user_id not in (sender_id, recipient_id):
+        cursor.close()
+        db.close()
+        return {"error": "You can only delete your own messages"}, 403
+
+    if user_id == sender_id:
+        del_sender = True
+    if user_id == recipient_id:
+        del_recipient = True
+
+    # Once both parties have removed it, drop the row entirely.
+    if del_sender and del_recipient:
+        cursor.execute("DELETE FROM direct_messages WHERE id = %s", (message_id,))
+    else:
+        cursor.execute(
+            "UPDATE direct_messages SET deleted_by_sender = %s, deleted_by_recipient = %s "
+            "WHERE id = %s",
+            (del_sender, del_recipient, message_id)
+        )
     db.commit()
     cursor.close()
     db.close()
