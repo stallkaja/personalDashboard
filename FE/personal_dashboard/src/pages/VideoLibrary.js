@@ -14,9 +14,11 @@ function formatFileSize(bytes) {
 export default function VideoLibrary() {
   const { token, user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // admins and "special" users can browse the local video directory
+  const canViewLocal = isAdmin || user?.role === "special";
   const fileInputRef = useRef(null);
 
-  const [tab, setTab] = useState(isAdmin ? "local" : "mine");
+  const [tab, setTab] = useState(canViewLocal ? "local" : "mine");
   const [myVideos, setMyVideos] = useState([]);
   const [sharedVideos, setSharedVideos] = useState([]);
   const [caption, setCaption] = useState("");
@@ -58,11 +60,11 @@ export default function VideoLibrary() {
   };
 
   useEffect(() => {
-    if (token && tab === "local" && isAdmin) {
+    if (token && tab === "local" && canViewLocal) {
       loadLocalVideos(currentPath);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, tab, currentPath, isAdmin]);
+  }, [token, tab, currentPath, canViewLocal]);
 
   const breadcrumbs = currentPath
     ? currentPath.split("/").reduce((acc, segment) => {
@@ -237,7 +239,7 @@ export default function VideoLibrary() {
             Shared Videos
           </button>
 
-          {isAdmin && (
+          {canViewLocal && (
             <button
               style={tab === "local" ? styles.tabActive : styles.tab}
               onClick={() => setTab("local")}

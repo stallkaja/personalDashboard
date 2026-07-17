@@ -1,0 +1,24 @@
+name: Deploy to home server
+
+# Deploy on every push to main; also runnable manually from the Actions tab.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# Never run two deploys at once; queue them instead of overlapping.
+concurrency:
+  group: deploy-home-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Pull latest and rebuild/restart what changed
+        shell: powershell
+        env:
+          DEPLOY_TOKEN: ${{ github.token }}
+        run: |
+          & "C:\Users\james\Documents\projects\personalDashboard\deploy.ps1"
+          exit $LASTEXITCODE

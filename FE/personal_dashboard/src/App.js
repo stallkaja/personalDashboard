@@ -5,6 +5,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
+import VideoRoute from "./components/VideoRoute";
 import ReminderBanner from "./components/ReminderBanner";
 import AnnouncementBanner from "./components/AnnouncementBanner";
 import AccentApplier from "./components/AccentApplier";
@@ -181,9 +182,9 @@ function App() {
           <Route
             path="/video-library"
             element={
-              <AdminRoute>
+              <VideoRoute>
                 <VideoLibrary />
-              </AdminRoute>
+              </VideoRoute>
             }
           />
 

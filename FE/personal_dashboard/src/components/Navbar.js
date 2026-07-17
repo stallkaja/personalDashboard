@@ -50,11 +50,11 @@ export default function Navbar() {
     return () => clearInterval(id);
   }, [token, loadUnread, location.pathname]);
 
+  const canVideos = user?.role === "admin" || user?.role === "special";
   const links = [
     ...LINKS,
-    ...(user?.role === "admin"
-      ? [{ to: "/video-library", label: "Videos" }, { to: "/admin", label: "Admin" }]
-      : [])
+    ...(canVideos ? [{ to: "/video-library", label: "Videos" }] : []),
+    ...(user?.role === "admin" ? [{ to: "/admin", label: "Admin" }] : [])
   ];
 
   const renderLabel = (link) =>
