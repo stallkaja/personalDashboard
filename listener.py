@@ -659,6 +659,16 @@ def admin_required():
     return claims.get("role") == "admin"
 
 
+# Roles allowed to browse/convert the local video library. "special" users get
+# full normal access plus the Videos page, but none of the admin-only powers.
+VIDEO_ROLES = ("admin", "special")
+
+
+def video_access_allowed():
+    claims = get_jwt()
+    return claims.get("role") in VIDEO_ROLES
+
+
 def hash_password(password):
     return bcrypt.hashpw(
         password.encode("utf-8"),
@@ -1683,7 +1693,7 @@ def admin_create_user():
     if not email or "@" not in email:
         return {"error": "A valid email address is required"}, 400
 
-    if role not in ["user", "admin"]:
+    if role not in ["user", "special", "admin"]:
         return {"error": "Invalid role"}, 400
 
     password_hash = hash_password(password)
@@ -1727,7 +1737,7 @@ def admin_update_user_role(user_id):
     data = request.json or {}
     role = data.get("role")
 
-    if role not in ["user", "admin"]:
+    if role not in ["user", "special", "admin"]:
         return {"error": "Invalid role"}, 400
 
     db = get_db()
@@ -3087,8 +3097,8 @@ def resolve_local_video_path(relpath):
 @app.route("/local-videos", methods=["GET"])
 @jwt_required()
 def list_local_videos():
-    if not admin_required():
-        return {"error": "Admins only"}, 403
+    if not video_access_allowed():
+        return {"error": "Video access required"}, 403
     base_dir = get_app_settings()["local_video_folder"]
 
     if not os.path.isdir(base_dir):
@@ -3326,8 +3336,8 @@ threading.Thread(target=_conversion_worker, daemon=True).start()
 @app.route("/local-videos/convert", methods=["POST"])
 @jwt_required()
 def convert_local_video():
-    if not admin_required():
-        return {"error": "Admins only"}, 403
+    if not video_access_allowed():
+        return {"error": "Video access required"}, 403
     data = request.json or {}
     relpath = data.get("path")
 
@@ -3352,8 +3362,8 @@ def convert_local_video():
 @app.route("/local-videos/convert-status", methods=["GET"])
 @jwt_required()
 def convert_local_video_status():
-    if not admin_required():
-        return {"error": "Admins only"}, 403
+    if not video_access_allowed():
+        return {"error": "Video access required"}, 403
     relpath = request.args.get("path")
 
     if not relpath:

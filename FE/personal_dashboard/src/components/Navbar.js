@@ -28,11 +28,11 @@ export default function Navbar() {
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const canVideos = user?.role === "admin" || user?.role === "special";
   const links = [
     ...LINKS,
-    ...(user?.role === "admin"
-      ? [{ to: "/video-library", label: "Videos" }, { to: "/admin", label: "Admin" }]
-      : [])
+    ...(canVideos ? [{ to: "/video-library", label: "Videos" }] : []),
+    ...(user?.role === "admin" ? [{ to: "/admin", label: "Admin" }] : [])
   ];
 
   const handleLogout = () => {

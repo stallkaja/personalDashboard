@@ -409,6 +409,7 @@ export default function Admin() {
             onChange={(e) => setNewRole(e.target.value)}
           >
             <option value="user">user</option>
+            <option value="special">special</option>
             <option value="admin">admin</option>
           </select>
 
@@ -449,6 +450,7 @@ export default function Admin() {
                     style={{ ...styles.smallInput, marginBottom: 8, width: "100%" }}
                   >
                     <option value="user">user</option>
+                    <option value="special">special</option>
                     <option value="admin">admin</option>
                   </select>
                 </div>
@@ -490,6 +492,7 @@ export default function Admin() {
                     <td style={styles.td}>
                       <select value={u.role} onChange={(e) => updateRole(u.id, e.target.value)} style={styles.smallInput}>
                         <option value="user">user</option>
+                        <option value="special">special</option>
                         <option value="admin">admin</option>
                       </select>
                     </td>
