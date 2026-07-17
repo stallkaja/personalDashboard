@@ -1688,6 +1688,307 @@ def admin_debug_db():
     }
 
 
+# --- DB management console (admin only, server-machine only) ---------------
+# A lightweight MySQL-Workbench-style surface: browse/edit table rows and run
+# arbitrary SQL. Powerful and deliberately dangerous, so it is gated by BOTH
+# admin_required() and request_ip_allowed_for_admin() (the same IP allow-list
+# that guards admin login), and identifiers are always validated against the
+# live schema and back-tick quoted while values stay parameterised.
+
+import datetime as _dt
+import decimal as _decimal
+
+
+def _require_db_admin():
+    """Guard for DB-management endpoints. Returns an (body, status) error tuple
+    when blocked, or None when the caller may proceed."""
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+    if not request_ip_allowed_for_admin():
+        return {"error": "DB management is only allowed from the server machine."}, 403
+    return None
+
+
+def _json_safe(v):
+    """Coerce a DB value into something JSON-serialisable."""
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, (_dt.datetime, _dt.date, _dt.time)):
+        return v.isoformat()
+    if isinstance(v, _dt.timedelta):
+        return str(v)
+    if isinstance(v, _decimal.Decimal):
+        return float(v)
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            return v.decode("utf-8")
+        except Exception:
+            return v.hex()
+    return str(v)
+
+
+def _list_base_tables(cursor):
+    cursor.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = %s AND table_type = 'BASE TABLE'
+        ORDER BY table_name
+    """, (DB_CONFIG["database"],))
+    return [r[0] for r in cursor.fetchall()]
+
+
+def _table_columns(cursor, table):
+    """Returns (columns_meta, column_names, primary_key_cols)."""
+    cursor.execute("""
+        SELECT column_name, column_type, is_nullable, column_key, column_default, extra
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+    """, (DB_CONFIG["database"], table))
+    meta, names, pk = [], [], []
+    for r in cursor.fetchall():
+        meta.append({
+            "name": r[0], "type": r[1], "nullable": r[2] == "YES",
+            "key": r[3], "default": r[4], "extra": r[5]
+        })
+        names.append(r[0])
+        if r[3] == "PRI":
+            pk.append(r[0])
+    return meta, names, pk
+
+
+@app.route("/admin/db/tables", methods=["GET"])
+@jwt_required()
+def admin_db_tables():
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT DATABASE()")
+    database_name = cursor.fetchone()[0]
+    cursor.execute("""
+        SELECT table_name, table_rows
+        FROM information_schema.tables
+        WHERE table_schema = %s AND table_type = 'BASE TABLE'
+        ORDER BY table_name
+    """, (DB_CONFIG["database"],))
+    tables = [{"name": r[0], "approx_rows": int(r[1]) if r[1] is not None else 0}
+              for r in cursor.fetchall()]
+    cursor.close()
+    db.close()
+    return {"database": database_name, "tables": tables}
+
+
+@app.route("/admin/db/table/<table>", methods=["GET"])
+@jwt_required()
+def admin_db_table_rows(table):
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    try:
+        limit = min(max(int(request.args.get("limit", 100)), 1), 500)
+    except (TypeError, ValueError):
+        limit = 100
+    try:
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except (TypeError, ValueError):
+        offset = 0
+
+    db = get_db()
+    cursor = db.cursor()
+    if table not in _list_base_tables(cursor):
+        cursor.close()
+        db.close()
+        return {"error": "Unknown table"}, 404
+
+    meta, names, pk = _table_columns(cursor, table)
+
+    cursor.execute(f"SELECT COUNT(*) FROM `{table}`")
+    total = cursor.fetchone()[0]
+
+    cursor.execute(f"SELECT * FROM `{table}` LIMIT %s OFFSET %s", (limit, offset))
+    col_order = [d[0] for d in cursor.description]
+    rows = [{c: _json_safe(v) for c, v in zip(col_order, r)} for r in cursor.fetchall()]
+
+    cursor.close()
+    db.close()
+    return {
+        "table": table, "columns": meta, "primary_key": pk,
+        "rows": rows, "total": total, "limit": limit, "offset": offset
+    }
+
+
+@app.route("/admin/db/table/<table>/rows", methods=["POST"])
+@jwt_required()
+def admin_db_insert_row(table):
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    values = (request.json or {}).get("values") or {}
+    if not values:
+        return {"error": "No values provided"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+    if table not in _list_base_tables(cursor):
+        cursor.close(); db.close()
+        return {"error": "Unknown table"}, 404
+
+    _, names, _ = _table_columns(cursor, table)
+    bad = [c for c in values if c not in names]
+    if bad:
+        cursor.close(); db.close()
+        return {"error": f"Unknown column(s): {', '.join(bad)}"}, 400
+
+    cols = list(values.keys())
+    placeholders = ", ".join(["%s"] * len(cols))
+    col_sql = ", ".join(f"`{c}`" for c in cols)
+    try:
+        cursor.execute(
+            f"INSERT INTO `{table}` ({col_sql}) VALUES ({placeholders})",
+            [values[c] for c in cols]
+        )
+        db.commit()
+        new_id = cursor.lastrowid
+    except Exception as e:
+        cursor.close(); db.close()
+        return {"error": str(e)}, 400
+
+    cursor.close(); db.close()
+    return {"inserted_id": new_id}, 201
+
+
+@app.route("/admin/db/table/<table>/rows", methods=["PUT"])
+@jwt_required()
+def admin_db_update_row(table):
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    data = request.json or {}
+    pk = data.get("pk") or {}
+    values = data.get("values") or {}
+    if not pk:
+        return {"error": "A primary-key match (pk) is required to update"}, 400
+    if not values:
+        return {"error": "No changed values provided"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+    if table not in _list_base_tables(cursor):
+        cursor.close(); db.close()
+        return {"error": "Unknown table"}, 404
+
+    _, names, _ = _table_columns(cursor, table)
+    bad = [c for c in list(values) + list(pk) if c not in names]
+    if bad:
+        cursor.close(); db.close()
+        return {"error": f"Unknown column(s): {', '.join(bad)}"}, 400
+
+    set_cols = list(values.keys())
+    where_cols = list(pk.keys())
+    set_sql = ", ".join(f"`{c}`=%s" for c in set_cols)
+    where_sql = " AND ".join(f"`{c}`<=>%s" for c in where_cols)
+    params = [values[c] for c in set_cols] + [pk[c] for c in where_cols]
+    try:
+        cursor.execute(f"UPDATE `{table}` SET {set_sql} WHERE {where_sql}", params)
+        db.commit()
+        affected = cursor.rowcount
+    except Exception as e:
+        cursor.close(); db.close()
+        return {"error": str(e)}, 400
+
+    cursor.close(); db.close()
+    return {"affected": affected}
+
+
+@app.route("/admin/db/table/<table>/rows", methods=["DELETE"])
+@jwt_required()
+def admin_db_delete_row(table):
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    pk = (request.json or {}).get("pk") or {}
+    if not pk:
+        return {"error": "A primary-key match (pk) is required to delete"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+    if table not in _list_base_tables(cursor):
+        cursor.close(); db.close()
+        return {"error": "Unknown table"}, 404
+
+    _, names, _ = _table_columns(cursor, table)
+    bad = [c for c in pk if c not in names]
+    if bad:
+        cursor.close(); db.close()
+        return {"error": f"Unknown column(s): {', '.join(bad)}"}, 400
+
+    where_cols = list(pk.keys())
+    where_sql = " AND ".join(f"`{c}`<=>%s" for c in where_cols)
+    try:
+        cursor.execute(f"DELETE FROM `{table}` WHERE {where_sql}", [pk[c] for c in where_cols])
+        db.commit()
+        affected = cursor.rowcount
+    except Exception as e:
+        cursor.close(); db.close()
+        return {"error": str(e)}, 400
+
+    cursor.close(); db.close()
+    return {"affected": affected}
+
+
+@app.route("/admin/db/query", methods=["POST"])
+@jwt_required()
+def admin_db_query():
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    sql = ((request.json or {}).get("sql") or "").strip()
+    if not sql:
+        return {"error": "No SQL provided"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(sql)
+        if cursor.description:  # produced a result set (SELECT, SHOW, etc.)
+            columns = [d[0] for d in cursor.description]
+            raw = cursor.fetchmany(2000)
+            rows = [[_json_safe(v) for v in r] for r in raw]
+            truncated = len(raw) == 2000 and cursor.fetchone() is not None
+            db.commit()
+            result = {
+                "type": "result",
+                "columns": columns,
+                "rows": rows,
+                "rowcount": len(rows),
+                "truncated": truncated
+            }
+        else:  # write / DDL
+            db.commit()
+            result = {
+                "type": "write",
+                "affected": cursor.rowcount,
+                "lastrowid": cursor.lastrowid
+            }
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        cursor.close(); db.close()
+        return {"error": str(e)}, 400
+
+    cursor.close(); db.close()
+    return result
+
+
 @app.route("/admin/users", methods=["GET"])
 @jwt_required()
 def admin_users():

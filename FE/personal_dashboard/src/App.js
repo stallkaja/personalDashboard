@@ -34,6 +34,7 @@ import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
 import Career from "./pages/Career";
 import Communication from "./pages/Communication";
+import DatabaseManager from "./pages/DatabaseManager";
 
 function App() {
   return (
@@ -219,6 +220,15 @@ function App() {
             element={
               <AdminRoute>
                 <Admin />
+              </AdminRoute>
+            }
+          />
+
+          <Route
+            path="/admin/database"
+            element={
+              <AdminRoute>
+                <DatabaseManager />
               </AdminRoute>
             }
           />

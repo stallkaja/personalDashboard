@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
 import theme, { colors } from "../styles/theme";
@@ -313,6 +314,16 @@ export default function Admin() {
       {status && <div style={styles.status}>{status}</div>}
 
       <div style={styles.card}>
+        <div style={styles.headerRow}>
+          <div>
+            <h2>Database Manager</h2>
+            <p style={styles.muted}>Browse and edit table rows, or run raw SQL against the live database.</p>
+          </div>
+          <Link to="/admin/database" style={styles.dbLink}>Open Database Manager →</Link>
+        </div>
+      </div>
+
+      <div style={styles.card}>
         <h2>Invite User by Email</h2>
         <p style={styles.muted}>Send an invitation link that lets someone create an account without waiting for approval.</p>
         <div style={styles.formRow}>
@@ -552,6 +563,14 @@ const styles = {
     border: "none"
   },
   button: theme.button,
+  dbLink: {
+    ...theme.button,
+    background: colors.primary,
+    color: colors.primaryText,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+    fontWeight: "bold"
+  },
   smallButton: theme.smallButton,
   dangerButton: theme.dangerButton,
   error: theme.error,
