@@ -32,7 +32,6 @@ import Drinks from "./pages/Drinks";
 import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
-import MyStuff from "./pages/MyStuff";
 import Career from "./pages/Career";
 import Communication from "./pages/Communication";
 
@@ -58,15 +57,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <ChangePassword />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/my-stuff"
-            element={
-              <ProtectedRoute>
-                <MyStuff />
               </ProtectedRoute>
             }
           />
