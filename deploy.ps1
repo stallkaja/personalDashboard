@@ -100,6 +100,12 @@ if (Changed "*.py") {
     Say "Dashboard-Backend = $((Get-Service Dashboard-Backend).Status)"
 }
 
+# --- frontend service restart (serve reads serve.json only at startup) ---
+if (Changed "FE/personal_dashboard/public/serve.json") {
+    Say "serve.json changed -> restart Dashboard-Frontend"
+    Restart-Service Dashboard-Frontend -Force -ErrorAction SilentlyContinue
+}
+
 # always make sure both are up
 Start-Service Dashboard-Backend, Dashboard-Frontend -ErrorAction SilentlyContinue
 Say "===== deploy end (backend=$((Get-Service Dashboard-Backend).Status) frontend=$((Get-Service Dashboard-Frontend).Status)) ====="
