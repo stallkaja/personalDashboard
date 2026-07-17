@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import theme, { colors } from "../styles/theme";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
@@ -10,40 +10,38 @@ export default function Communication() {
   const tz = useUserTimezone();
   const isMobile = useIsMobile();
 
-  const [box, setBox] = useState("inbox");           // "inbox" | "sent"
-  const [messages, setMessages] = useState([]);
-  const [selected, setSelected] = useState(null);    // full message being read
-  const [composing, setComposing] = useState(false);
-  const [users, setUsers] = useState([]);
-  const [unread, setUnread] = useState(0);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [conversations, setConversations] = useState([]);
+  const [convLoading, setConvLoading] = useState(true);
 
-  // Compose form state
-  const [toId, setToId] = useState("");
-  const [subject, setSubject] = useState("");
-  const [bodyText, setBodyText] = useState("");
-  const [parentId, setParentId] = useState(null);
+  const [users, setUsers] = useState([]);           // all users (for the picker)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+
+  const [activeUser, setActiveUser] = useState(null); // { id, username }
+  const [threadMessages, setThreadMessages] = useState([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+
+  const [composerText, setComposerText] = useState("");
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
 
-  const authHeaders = { Authorization: `Bearer ${token}` };
+  const scrollRef = useRef(null);
+  const activeIdRef = useRef(null);
+  const prevCountRef = useRef(0);
 
-  const loadList = useCallback(() => {
+  const authHeaders = useCallback(
+    () => ({ Authorization: `Bearer ${token}` }),
+    [token]
+  );
+
+  // ---- data loading -------------------------------------------------------
+  const loadConversations = useCallback(() => {
     if (!token) return;
-    setLoading(true);
-    fetch(`${API_URL}/direct-messages?box=${box}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_URL}/direct-messages/conversations`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.json())
-      .then((data) => setMessages(data.messages || []))
-      .catch(() => setError("Could not load messages."))
-      .finally(() => setLoading(false));
-  }, [token, box]);
-
-  const loadUnread = useCallback(() => {
-    if (!token) return;
-    fetch(`${API_URL}/direct-messages/unread-count`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => res.json())
-      .then((data) => setUnread(data.unread || 0))
-      .catch(() => {});
+      .then((data) => setConversations(data.conversations || []))
+      .catch(() => {})
+      .finally(() => setConvLoading(false));
   }, [token]);
 
   const loadUsers = useCallback(() => {
@@ -54,77 +52,89 @@ export default function Communication() {
       .catch(() => {});
   }, [token]);
 
-  useEffect(() => { loadList(); }, [loadList]);
-  useEffect(() => { loadUnread(); loadUsers(); }, [loadUnread, loadUsers]);
+  const loadThread = useCallback((otherId, { silent } = {}) => {
+    if (!token || !otherId) return;
+    if (!silent) setThreadLoading(true);
+    fetch(`${API_URL}/direct-messages/thread/${otherId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => res.json())
+      .then((data) => {
+        // Ignore late responses if the user switched threads mid-flight.
+        if (activeIdRef.current !== otherId) return;
+        setThreadMessages(data.messages || []);
+        if (data.user) setActiveUser(data.user);
+      })
+      .catch(() => setError("Could not load conversation."))
+      .finally(() => { if (!silent) setThreadLoading(false); });
+  }, [token]);
 
-  const openMessage = async (m) => {
-    setError("");
-    try {
-      const res = await fetch(`${API_URL}/direct-messages/${m.id}`, { headers: authHeaders });
-      if (!res.ok) { setError("Could not open message."); return; }
-      const data = await res.json();
-      setSelected(data.message);
-      // Reflect read state in the list + badge without a full reload.
-      if (box === "inbox" && !m.is_read) {
-        setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, is_read: true } : x)));
-        setUnread((n) => Math.max(0, n - 1));
-      }
-    } catch {
-      setError("Network error opening message.");
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  useEffect(() => {
+    loadConversations();
+    const id = setInterval(loadConversations, 20000);
+    return () => clearInterval(id);
+  }, [loadConversations]);
+
+  // Poll the open thread so incoming replies appear without a manual refresh.
+  useEffect(() => {
+    if (!activeUser) return;
+    const id = setInterval(() => {
+      loadThread(activeUser.id, { silent: true });
+      loadConversations();
+    }, 8000);
+    return () => clearInterval(id);
+  }, [activeUser, loadThread, loadConversations]);
+
+  // Auto-scroll to the newest message when the thread grows or opens.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (threadMessages.length !== prevCountRef.current) {
+      el.scrollTop = el.scrollHeight;
+      prevCountRef.current = threadMessages.length;
     }
-  };
+  }, [threadMessages, activeUser]);
 
-  const startCompose = () => {
-    setParentId(null);
-    setToId("");
-    setSubject("");
-    setBodyText("");
-    setSelected(null);
-    setComposing(true);
+  // ---- actions ------------------------------------------------------------
+  const openThread = (otherUser) => {
     setError("");
+    setPickerOpen(false);
+    setPickerQuery("");
+    setComposerText("");
+    prevCountRef.current = 0;
+    activeIdRef.current = otherUser.id;
+    setActiveUser({ id: otherUser.id, username: otherUser.username });
+    setThreadMessages([]);
+    loadThread(otherUser.id);
+    // Clearing unread happens server-side on thread open; refresh the list.
+    setTimeout(loadConversations, 400);
   };
 
-  const startReply = (m) => {
-    const base = m.subject && m.subject !== "(no subject)" ? m.subject : "";
-    setParentId(m.id);
-    setToId(String(m.sender_id));
-    setSubject(base.startsWith("Re:") ? base : `Re: ${base}`.trim());
-    setBodyText("");
-    setSelected(null);
-    setComposing(true);
-    setError("");
-  };
-
-  const cancelCompose = () => {
-    setComposing(false);
-    setParentId(null);
+  const closeThread = () => {
+    activeIdRef.current = null;
+    setActiveUser(null);
+    setThreadMessages([]);
   };
 
   const send = async () => {
-    if (!toId) { setError("Please choose a recipient."); return; }
-    if (!bodyText.trim()) { setError("Message body cannot be empty."); return; }
+    const text = composerText.trim();
+    if (!text || !activeUser) return;
     setSending(true);
     setError("");
     try {
       const res = await fetch(`${API_URL}/direct-messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({
-          recipient_id: Number(toId),
-          subject: subject.trim(),
-          body: bodyText.trim(),
-          parent_id: parentId
-        })
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ recipient_id: activeUser.id, body: text })
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(data.error || "Could not send message.");
         return;
       }
-      setComposing(false);
-      setParentId(null);
-      setBox("sent");
-      loadList();
+      setComposerText("");
+      loadThread(activeUser.id, { silent: true });
+      loadConversations();
     } catch {
       setError("Network error sending message.");
     } finally {
@@ -132,289 +142,367 @@ export default function Communication() {
     }
   };
 
-  const remove = async (id) => {
+  const deleteMessage = async (id) => {
     try {
-      await fetch(`${API_URL}/direct-messages/${id}`, { method: "DELETE", headers: authHeaders });
-      setMessages((prev) => prev.filter((m) => m.id !== id));
-      if (selected && selected.id === id) setSelected(null);
-      loadUnread();
+      await fetch(`${API_URL}/direct-messages/${id}`, { method: "DELETE", headers: authHeaders() });
+      setThreadMessages((prev) => prev.filter((m) => m.id !== id));
+      loadConversations();
     } catch {
       setError("Could not delete message.");
     }
   };
 
-  const fmt = (iso) => {
+  const onComposerKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  const fmtTime = (iso) => {
     if (!iso) return "";
     try {
-      return new Date(iso).toLocaleString(undefined, {
-        timeZone: tz || undefined,
-        month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
+      return new Date(iso).toLocaleTimeString(undefined, {
+        timeZone: tz || undefined, hour: "numeric", minute: "2-digit"
       });
     } catch { return ""; }
   };
 
-  const partyLabel = (m) => (box === "inbox" ? m.sender_name : `To: ${m.recipient_name}`);
+  const fmtWhen = (iso) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      return d.toLocaleString(undefined, sameDay
+        ? { timeZone: tz || undefined, hour: "numeric", minute: "2-digit" }
+        : { timeZone: tz || undefined, month: "short", day: "numeric" });
+    } catch { return ""; }
+  };
 
-  // ---- Compose view -------------------------------------------------------
-  if (composing) {
-    return (
-      <div style={theme.page}>
-        <h1>✉️ {parentId ? "Reply" : "New Message"}</h1>
+  const initials = (name) => (name || "?").trim().charAt(0).toUpperCase();
 
-        <div style={theme.card}>
-          <label style={theme.label}>To</label>
-          <select style={theme.input} value={toId} onChange={(e) => setToId(e.target.value)}>
-            <option value="">Select a recipient…</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>{u.username}</option>
-            ))}
-          </select>
+  const filteredUsers = users.filter((u) =>
+    u.username.toLowerCase().includes(pickerQuery.trim().toLowerCase())
+  );
 
-          <label style={theme.label}>Subject</label>
-          <input
-            style={theme.input}
-            placeholder="Subject (optional)"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            maxLength={255}
-          />
+  const showSidebar = !isMobile || !activeUser;
+  const showThread = !isMobile || !!activeUser;
 
-          <label style={theme.label}>Message</label>
-          <textarea
-            style={styles.textarea}
-            rows={8}
-            placeholder="Write your message…"
-            value={bodyText}
-            onChange={(e) => setBodyText(e.target.value)}
-            maxLength={5000}
-          />
-
-          {error && <div style={theme.error}>{error}</div>}
-
-          <div style={styles.actionRow}>
-            <button style={theme.button} onClick={send} disabled={sending || !toId || !bodyText.trim()}>
-              {sending ? "Sending…" : "Send"}
-            </button>
-            <button style={styles.neutralBtn} onClick={cancelCompose} disabled={sending}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Reading view -------------------------------------------------------
-  if (selected) {
-    return (
-      <div style={theme.page}>
-        <button style={styles.backBtn} onClick={() => setSelected(null)}>‹ Back</button>
-
-        <div style={theme.card}>
-          <h2 style={{ marginTop: 0 }}>{selected.subject}</h2>
-          <div style={styles.metaLine}>
-            <strong>From:</strong> {selected.sender_name}
-            {selected.sender_id === user?.id ? " (you)" : ""}
-          </div>
-          <div style={styles.metaLine}>
-            <strong>To:</strong> {selected.recipient_name}
-            {selected.recipient_id === user?.id ? " (you)" : ""}
-          </div>
-          <div style={styles.metaTime}>{fmt(selected.created_at)}</div>
-
-          <div style={styles.readBody}>{selected.body}</div>
-
-          <div style={styles.actionRow}>
-            {selected.recipient_id === user?.id && (
-              <button style={theme.button} onClick={() => startReply(selected)}>Reply</button>
-            )}
-            <button style={styles.deleteBtn} onClick={() => remove(selected.id)}>Delete</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- List view ----------------------------------------------------------
-  return (
-    <div style={theme.page}>
-      <div style={styles.header}>
-        <h1 style={{ margin: 0 }}>💬 Communication</h1>
-        <button style={theme.button} onClick={startCompose}>✉️ New Message</button>
-      </div>
-      <p style={styles.muted}>Private messages between members — like an internal inbox.</p>
-
-      <div style={styles.tabs}>
-        <button
-          style={box === "inbox" ? styles.tabActive : styles.tab}
-          onClick={() => { setBox("inbox"); setSelected(null); }}
-        >
-          Inbox{unread > 0 ? ` (${unread})` : ""}
-        </button>
-        <button
-          style={box === "sent" ? styles.tabActive : styles.tab}
-          onClick={() => { setBox("sent"); setSelected(null); }}
-        >
-          Sent
+  // ---- sidebar (conversation list) ---------------------------------------
+  const sidebar = (
+    <aside style={{ ...styles.sidebar, ...(isMobile ? styles.sidebarMobile : {}) }}>
+      <div style={styles.sidebarHeader}>
+        <h2 style={styles.sidebarTitle}>Messages</h2>
+        <button style={theme.button} onClick={() => { setPickerOpen(true); setPickerQuery(""); }}>
+          ✏️ New
         </button>
       </div>
 
-      {error && <div style={theme.error}>{error}</div>}
-
-      {loading ? (
+      {convLoading ? (
         <p style={styles.muted}>Loading…</p>
-      ) : messages.length === 0 ? (
-        <div style={theme.card}>
-          <p style={styles.muted}>
-            {box === "inbox" ? "Your inbox is empty." : "You haven't sent any messages yet."}
-          </p>
-        </div>
+      ) : conversations.length === 0 ? (
+        <p style={styles.muted}>No conversations yet. Start one with “New”.</p>
       ) : (
-        <div style={theme.card}>
-          {messages.map((m, idx) => {
-            const unreadRow = box === "inbox" && !m.is_read;
+        <div style={styles.convList}>
+          {conversations.map((c) => {
+            const active = activeUser && activeUser.id === c.user_id;
             return (
-              <div
-                key={m.id}
-                style={{
-                  ...styles.row,
-                  padding: isMobile ? "12px 2px" : "12px 4px",
-                  ...(idx === 0 ? { borderTop: "none" } : {}),
-                  ...(unreadRow ? styles.rowUnread : {})
-                }}
-                onClick={() => openMessage(m)}
+              <button
+                key={c.user_id}
+                style={{ ...styles.convItem, ...(active ? styles.convItemActive : {}) }}
+                onClick={() => openThread({ id: c.user_id, username: c.username })}
               >
-                <div style={styles.rowMain}>
-                  <div style={styles.rowTop}>
-                    <span style={{ fontWeight: unreadRow ? 700 : 500 }}>
-                      {unreadRow ? "● " : ""}{partyLabel(m)}
+                <span style={styles.avatar}>{initials(c.username)}</span>
+                <span style={styles.convMain}>
+                  <span style={styles.convTop}>
+                    <span style={{ fontWeight: c.unread ? 700 : 600 }}>{c.username}</span>
+                    <span style={styles.convTime}>{fmtWhen(c.last_time)}</span>
+                  </span>
+                  <span style={styles.convPreview}>
+                    <span style={{ ...styles.convText, fontWeight: c.unread ? 600 : 400 }}>
+                      {c.last_from_me ? "You: " : ""}{c.last_message}
                     </span>
-                    <span style={styles.rowTime}>{fmt(m.created_at)}</span>
-                  </div>
-                  <div style={{ ...styles.rowSubject, fontWeight: unreadRow ? 700 : 400 }}>
-                    {m.subject}
-                  </div>
-                  <div style={styles.rowSnippet}>
-                    {m.body.length > 120 ? `${m.body.slice(0, 120)}…` : m.body}
-                  </div>
-                </div>
-                <button
-                  style={styles.rowDelete}
-                  onClick={(e) => { e.stopPropagation(); remove(m.id); }}
-                  aria-label="Delete message"
-                  title="Delete"
-                >
-                  ✕
-                </button>
-              </div>
+                    {c.unread > 0 && <span style={styles.unreadDot}>{c.unread}</span>}
+                  </span>
+                </span>
+              </button>
             );
           })}
+        </div>
+      )}
+    </aside>
+  );
+
+  // ---- thread pane --------------------------------------------------------
+  const threadPane = (
+    <section style={styles.threadPane}>
+      {!activeUser ? (
+        <div style={styles.emptyThread}>
+          <p style={styles.muted}>Select a conversation or start a new one.</p>
+        </div>
+      ) : (
+        <>
+          <div style={styles.threadHeader}>
+            {isMobile && (
+              <button style={styles.backBtn} onClick={closeThread} aria-label="Back">‹</button>
+            )}
+            <span style={styles.avatar}>{initials(activeUser.username)}</span>
+            <strong style={{ fontSize: 16 }}>{activeUser.username}</strong>
+          </div>
+
+          <div style={styles.messages} ref={scrollRef}>
+            {threadLoading ? (
+              <p style={styles.muted}>Loading…</p>
+            ) : threadMessages.length === 0 ? (
+              <p style={styles.mutedCenter}>No messages yet. Say hello 👋</p>
+            ) : (
+              threadMessages.map((m) => {
+                const mine = m.sender_id === user?.id;
+                return (
+                  <div key={m.id} style={{ ...styles.bubbleRow, justifyContent: mine ? "flex-end" : "flex-start" }}>
+                    <div style={{ ...styles.bubble, ...(mine ? styles.bubbleMine : styles.bubbleTheirs) }}>
+                      <div style={styles.bubbleBody}>{m.body}</div>
+                      <div style={{ ...styles.bubbleTime, color: mine ? colors.primaryText : colors.textMuted }}>
+                        {fmtTime(m.created_at)}
+                        <button
+                          style={{ ...styles.msgDelete, color: mine ? colors.primaryText : colors.text }}
+                          onClick={() => deleteMessage(m.id)}
+                          title="Delete for me"
+                          aria-label="Delete message"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {error && <div style={{ ...theme.error, margin: "0 12px 8px" }}>{error}</div>}
+
+          <div style={styles.composer}>
+            <textarea
+              style={styles.composerInput}
+              rows={1}
+              placeholder={`Message ${activeUser.username}…`}
+              value={composerText}
+              onChange={(e) => setComposerText(e.target.value)}
+              onKeyDown={onComposerKey}
+              maxLength={5000}
+            />
+            <button
+              style={{ ...theme.button, opacity: !composerText.trim() || sending ? 0.5 : 1 }}
+              onClick={send}
+              disabled={!composerText.trim() || sending}
+            >
+              {sending ? "…" : "Send"}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.layout}>
+        {showSidebar && sidebar}
+        {showThread && threadPane}
+      </div>
+
+      {pickerOpen && (
+        <div style={styles.overlay} onClick={() => setPickerOpen(false)}>
+          <div style={styles.picker} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.pickerHeader}>
+              <strong>New message</strong>
+              <button style={styles.iconBtn} onClick={() => setPickerOpen(false)} aria-label="Close">✕</button>
+            </div>
+            <input
+              style={theme.input}
+              autoFocus
+              placeholder="Search people…"
+              value={pickerQuery}
+              onChange={(e) => setPickerQuery(e.target.value)}
+            />
+            <div style={styles.pickerList}>
+              {filteredUsers.length === 0 ? (
+                <p style={styles.muted}>No matching people.</p>
+              ) : (
+                filteredUsers.map((u) => (
+                  <button key={u.id} style={styles.pickerItem} onClick={() => openThread(u)}>
+                    <span style={styles.avatar}>{initials(u.username)}</span>
+                    {u.username}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+const PANE_HEIGHT = "calc(100vh - 96px)";
+
 const styles = {
-  header: {
+  page: { ...theme.page, paddingBottom: 12 },
+  layout: {
+    display: "flex",
+    gap: 16,
+    height: PANE_HEIGHT,
+    minHeight: 0
+  },
+  muted: { opacity: 0.7, lineHeight: 1.5, padding: "4px 4px" },
+  mutedCenter: { opacity: 0.6, textAlign: "center", marginTop: 24 },
+
+  // Sidebar
+  sidebar: {
+    width: 320,
+    flexShrink: 0,
+    background: colors.surface,
+    borderRadius: 12,
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0
+  },
+  sidebarMobile: { width: "100%" },
+  sidebarHeader: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
-    flexWrap: "wrap"
+    marginBottom: 10
   },
-  muted: { opacity: 0.75, lineHeight: 1.5, marginBottom: 12 },
-  tabs: { display: "flex", gap: 8, marginBottom: 16 },
-  tab: {
-    padding: "8px 16px",
-    borderRadius: 8,
+  sidebarTitle: { margin: 0, fontSize: 20 },
+  convList: { overflowY: "auto", display: "flex", flexDirection: "column", gap: 2, minHeight: 0 },
+  convItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 8px",
+    borderRadius: 10,
     border: "none",
-    cursor: "pointer",
-    background: colors.surfaceAlt,
+    background: "transparent",
     color: colors.text,
-    fontSize: 14
-  },
-  tabActive: {
-    padding: "8px 16px",
-    borderRadius: 8,
-    border: "none",
     cursor: "pointer",
-    background: colors.primary,
-    color: colors.primaryText,
-    fontWeight: "bold",
-    fontSize: 14
+    textAlign: "left",
+    width: "100%"
   },
-  textarea: {
-    width: "100%",
-    boxSizing: "border-box",
+  convItemActive: { background: colors.surfaceAlt },
+  convMain: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 },
+  convTop: { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" },
+  convTime: { fontSize: 11, opacity: 0.6, whiteSpace: "nowrap" },
+  convPreview: { display: "flex", alignItems: "center", gap: 6 },
+  convText: {
+    flex: 1, minWidth: 0, fontSize: 13, opacity: 0.75,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+  },
+  unreadDot: {
+    flexShrink: 0,
+    minWidth: 18, height: 18, padding: "0 5px",
+    borderRadius: 9, background: colors.primary, color: colors.primaryText,
+    fontSize: 11, fontWeight: "bold", lineHeight: "18px", textAlign: "center"
+  },
+  avatar: {
+    flexShrink: 0,
+    width: 34, height: 34, borderRadius: "50%",
+    background: colors.primary, color: colors.primaryText,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    fontWeight: "bold", fontSize: 15
+  },
+
+  // Thread
+  threadPane: {
+    flex: 1,
+    minWidth: 0,
+    background: colors.surface,
+    borderRadius: 12,
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0
+  },
+  emptyThread: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center" },
+  threadHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: 14,
+    borderBottom: `1px solid ${colors.border}`
+  },
+  backBtn: {
+    background: "transparent", border: "none", color: colors.text,
+    fontSize: 26, lineHeight: 1, cursor: "pointer", padding: "0 6px 0 0"
+  },
+  messages: {
+    flex: 1,
+    overflowY: "auto",
+    padding: 14,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    minHeight: 0
+  },
+  bubbleRow: { display: "flex" },
+  bubble: { maxWidth: "72%", padding: "8px 12px", borderRadius: 14 },
+  bubbleMine: { background: colors.primary, color: colors.primaryText, borderBottomRightRadius: 4 },
+  bubbleTheirs: { background: colors.surfaceAlt, color: colors.text, borderBottomLeftRadius: 4 },
+  bubbleBody: { whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.4, fontSize: 15 },
+  bubbleTime: {
+    fontSize: 10.5, opacity: 0.8, marginTop: 3,
+    display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end"
+  },
+  msgDelete: {
+    background: "transparent", border: "none", cursor: "pointer",
+    fontSize: 10, opacity: 0.6, padding: 0
+  },
+  composer: {
+    display: "flex",
+    gap: 8,
+    alignItems: "flex-end",
     padding: 12,
-    borderRadius: 8,
+    borderTop: `1px solid ${colors.border}`
+  },
+  composerInput: {
+    flex: 1,
+    resize: "none",
+    maxHeight: 120,
+    padding: 10,
+    borderRadius: 10,
     border: `1px solid ${colors.border}`,
     background: colors.surfaceAlt,
     color: colors.text,
     fontSize: 15,
     fontFamily: "inherit",
-    resize: "vertical",
-    marginBottom: 12
+    lineHeight: 1.4
   },
-  actionRow: { display: "flex", gap: 10, alignItems: "center", marginTop: 4 },
-  neutralBtn: {
-    padding: "10px 15px",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-    background: colors.border,
-    color: colors.text,
-    fontSize: 15
+
+  // New-message picker
+  overlay: {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+    display: "flex", alignItems: "flex-start", justifyContent: "center",
+    padding: "10vh 16px 16px", zIndex: 1000
   },
-  backBtn: {
-    padding: "8px 14px",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-    background: colors.border,
-    color: colors.text,
-    marginBottom: 16
+  picker: {
+    width: "100%", maxWidth: 420,
+    background: colors.surface, borderRadius: 12, padding: 16,
+    boxShadow: "0 10px 40px rgba(0,0,0,0.35)"
   },
-  metaLine: { fontSize: 14, opacity: 0.85, marginBottom: 2 },
-  metaTime: { fontSize: 13, opacity: 0.6, marginTop: 6, marginBottom: 16 },
-  readBody: {
-    whiteSpace: "pre-wrap",
-    lineHeight: 1.6,
-    fontSize: 15,
-    borderTop: `1px solid ${colors.border}`,
-    paddingTop: 16,
-    marginBottom: 16
+  pickerHeader: {
+    display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12
   },
-  deleteBtn: {
-    padding: "10px 15px",
-    borderRadius: 8,
-    border: "none",
-    cursor: "pointer",
-    background: colors.border,
-    color: colors.text,
-    fontSize: 15
+  iconBtn: {
+    background: "transparent", border: "none", color: colors.text,
+    fontSize: 16, cursor: "pointer", opacity: 0.7
   },
-  row: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 10,
-    padding: "12px 4px",
-    borderTop: `1px solid ${colors.border}`,
-    cursor: "pointer"
-  },
-  rowUnread: { background: colors.surfaceAlt, borderRadius: 8 },
-  rowMain: { flex: 1, minWidth: 0 },
-  rowTop: { display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" },
-  rowTime: { fontSize: 12, opacity: 0.6, whiteSpace: "nowrap" },
-  rowSubject: { fontSize: 15, margin: "2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  rowSnippet: { fontSize: 13, opacity: 0.65, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  rowDelete: {
-    background: "transparent",
-    border: "none",
-    color: colors.text,
-    opacity: 0.4,
-    cursor: "pointer",
-    fontSize: 14,
-    padding: 4,
-    flexShrink: 0
+  pickerList: { marginTop: 8, maxHeight: "40vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 },
+  pickerItem: {
+    display: "flex", alignItems: "center", gap: 10,
+    padding: "10px 8px", borderRadius: 10, border: "none",
+    background: "transparent", color: colors.text, cursor: "pointer",
+    textAlign: "left", width: "100%", fontSize: 15
   }
 };

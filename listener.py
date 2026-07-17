@@ -4182,18 +4182,29 @@ def delete_message(message_id):
 @app.route("/users", methods=["GET"])
 @jwt_required()
 def list_users_for_messaging():
-    """Approved users, for the compose recipient picker. Any signed-in user."""
+    """Approved users, for the compose recipient picker. Any signed-in user.
+    Optional ?q= filters by username substring (case-insensitive)."""
     claims = get_jwt()
     user_id = int(claims["sub"])
+    q = (request.args.get("q") or "").strip()
 
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("""
-        SELECT id, username
-        FROM users
-        WHERE status = 'approved' OR status IS NULL
-        ORDER BY username ASC
-    """)
+    if q:
+        cursor.execute("""
+            SELECT id, username
+            FROM users
+            WHERE (status = 'approved' OR status IS NULL)
+              AND username LIKE %s
+            ORDER BY username ASC
+        """, (f"%{q}%",))
+    else:
+        cursor.execute("""
+            SELECT id, username
+            FROM users
+            WHERE status = 'approved' OR status IS NULL
+            ORDER BY username ASC
+        """)
     rows = cursor.fetchall()
     cursor.close()
     db.close()
@@ -4229,6 +4240,108 @@ DM_COLUMNS = """
     id, sender_id, sender_name, recipient_id, recipient_name,
     subject, body, parent_id, is_read, read_at, created_at
 """
+
+
+@app.route("/direct-messages/conversations", methods=["GET"])
+@jwt_required()
+def list_conversations():
+    """One entry per person the current user has exchanged messages with:
+    the counterpart, the latest (non-deleted-for-me) message, and how many
+    are unread. Powers the chat conversation list."""
+    claims = get_jwt()
+    me = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(f"""
+        SELECT {DM_COLUMNS} FROM direct_messages
+        WHERE (sender_id = %s AND deleted_by_sender = FALSE)
+           OR (recipient_id = %s AND deleted_by_recipient = FALSE)
+        ORDER BY created_at ASC, id ASC
+    """, (me, me))
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    convos = {}
+    for r in rows:
+        m = _dm_to_dict(r, me)
+        other_id = m["recipient_id"] if m["sender_id"] == me else m["sender_id"]
+        other_name = m["recipient_name"] if m["sender_id"] == me else m["sender_name"]
+        entry = convos.get(other_id)
+        if entry is None:
+            entry = {
+                "user_id": other_id,
+                "username": other_name,
+                "last_message": None,
+                "last_time": None,
+                "last_from_me": False,
+                "unread": 0,
+            }
+            convos[other_id] = entry
+        # Rows are ascending, so the last one seen is the most recent.
+        entry["username"] = other_name
+        entry["last_message"] = m["body"]
+        entry["last_time"] = m["created_at"]
+        entry["last_from_me"] = m["sender_id"] == me
+        if m["recipient_id"] == me and not m["is_read"]:
+            entry["unread"] += 1
+
+    ordered = sorted(
+        convos.values(),
+        key=lambda e: e["last_time"] or "",
+        reverse=True,
+    )
+    return {"conversations": ordered}
+
+
+@app.route("/direct-messages/thread/<int:other_id>", methods=["GET"])
+@jwt_required()
+def get_thread(other_id):
+    """The full back-and-forth between the current user and other_id, oldest
+    first. Opening a thread marks every inbound message in it as read."""
+    claims = get_jwt()
+    me = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute("SELECT id, username FROM users WHERE id = %s", (other_id,))
+    other = cursor.fetchone()
+    if not other:
+        cursor.close()
+        db.close()
+        return {"error": "User not found"}, 404
+
+    cursor.execute(f"""
+        SELECT {DM_COLUMNS} FROM direct_messages
+        WHERE (
+                (sender_id = %s AND recipient_id = %s AND deleted_by_sender = FALSE)
+             OR (sender_id = %s AND recipient_id = %s AND deleted_by_recipient = FALSE)
+        )
+        ORDER BY created_at ASC, id ASC
+    """, (me, other_id, other_id, me))
+    rows = cursor.fetchall()
+
+    # Mark inbound messages in this thread as read.
+    cursor.execute("""
+        UPDATE direct_messages
+        SET is_read = TRUE, read_at = NOW()
+        WHERE recipient_id = %s AND sender_id = %s AND is_read = FALSE
+    """, (me, other_id))
+    db.commit()
+    cursor.close()
+    db.close()
+
+    messages = [_dm_to_dict(r, me) for r in rows]
+    for m in messages:
+        if m["recipient_id"] == me:
+            m["is_read"] = True
+
+    return {
+        "messages": messages,
+        "user": {"id": other[0], "username": other[1]},
+    }
 
 
 @app.route("/direct-messages", methods=["GET"])
