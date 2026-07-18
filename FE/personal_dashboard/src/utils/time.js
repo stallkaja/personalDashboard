@@ -75,6 +75,34 @@ export function formatTimeInTz(iso, tz) {
   });
 }
 
+// A "YYYY-MM-DDTHH:mm" value for a <input type="datetime-local">, rendering an
+// event instant as its wall-clock time in `tz`. Floating (offset-less) strings
+// are returned verbatim so they round-trip unchanged.
+export function toDatetimeLocalInTz(iso, tz) {
+  if (!iso) return "";
+  if (!hasOffset(iso)) {
+    const f = parseFloating(iso);
+    if (!f) return String(iso).slice(0, 16);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${f.year}-${f.month}-${f.day}T${pad(f.hour)}:${pad(f.minute)}`;
+  }
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(new Date(iso));
+    const get = (t) => parts.find((p) => p.type === t)?.value;
+    return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+  } catch {
+    return String(iso).slice(0, 16);
+  }
+}
+
 // A short zone abbreviation (e.g. "EDT") for `tz` on `date`, for labelling.
 export function tzAbbrev(tz, date = new Date()) {
   try {

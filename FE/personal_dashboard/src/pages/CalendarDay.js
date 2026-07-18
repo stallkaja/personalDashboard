@@ -5,7 +5,7 @@ import useUserTimezone from "../hooks/useUserTimezone";
 
 import theme, { colors } from "../styles/theme";
 import { API_URL } from "../config";
-import { dayKeyInTz, formatTimeInTz, tzAbbrev } from "../utils/time";
+import { dayKeyInTz, formatTimeInTz, tzAbbrev, toDatetimeLocalInTz } from "../utils/time";
 
 const RECURRENCE_OPTIONS = [
   { value: "none", label: "Does not repeat" },
@@ -27,6 +27,7 @@ export default function CalendarDay() {
   const [endTime, setEndTime] = useState("");
   const [recurrenceRule, setRecurrenceRule] = useState("none");
   const [recurrenceEnd, setRecurrenceEnd] = useState("");
+  const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
 
   const loadEvents = async () => {
@@ -46,7 +47,35 @@ export default function CalendarDay() {
     if (token) loadEvents();
   }, [token, date, tz]);
 
-  const addEvent = async () => {
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle("");
+    setDescription("");
+    setStartTime(`${date}T09:00`);
+    setEndTime("");
+    setRecurrenceRule("none");
+    setRecurrenceEnd("");
+  };
+
+  const startEdit = (event) => {
+    if (event.is_generated && !window.confirm(
+      "This is a generated occurrence of a repeating event. Editing will change the entire series. Continue?"
+    )) {
+      return;
+    }
+
+    setError("");
+    setEditingId(event.id);
+    setTitle(event.title || "");
+    setDescription(event.description || "");
+    setStartTime(toDatetimeLocalInTz(event.start_time, tz) || `${date}T09:00`);
+    setEndTime(event.end_time ? toDatetimeLocalInTz(event.end_time, tz) : "");
+    setRecurrenceRule(event.recurrence_rule || "none");
+    setRecurrenceEnd(event.recurrence_end || "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const submitEvent = async () => {
     setError("");
 
     if (!title || !startTime) {
@@ -54,9 +83,13 @@ export default function CalendarDay() {
       return;
     }
 
+    const isEdit = editingId !== null;
+    const url = isEdit ? `${API_URL}/events/${editingId}` : `${API_URL}/events`;
+    const method = isEdit ? "PUT" : "POST";
+
     try {
-      const res = await fetch(`${API_URL}/events`, {
-        method: "POST",
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
@@ -73,19 +106,14 @@ export default function CalendarDay() {
       });
 
       if (!res.ok) {
-        setError("Failed to create event.");
+        setError(isEdit ? "Failed to update event." : "Failed to create event.");
         return;
       }
 
-      setTitle("");
-      setDescription("");
-      setStartTime(`${date}T09:00`);
-      setEndTime("");
-      setRecurrenceRule("none");
-      setRecurrenceEnd("");
+      resetForm();
       loadEvents();
     } catch {
-      setError("Network error creating event.");
+      setError(isEdit ? "Network error updating event." : "Network error creating event.");
     }
   };
 
@@ -125,7 +153,7 @@ export default function CalendarDay() {
       {error && <div style={styles.error}>{error}</div>}
 
       <div style={styles.card}>
-        <h2>Add Event</h2>
+        <h2>{editingId ? "Edit Event" : "Add Event"}</h2>
         <p style={styles.tzNote}>Times are entered and shown in {tz} ({tzAbbrev(tz)})</p>
 
         <input
@@ -181,9 +209,16 @@ export default function CalendarDay() {
           </>
         )}
 
-        <button style={styles.button} onClick={addEvent}>
-          Add Event
-        </button>
+        <div style={styles.formActions}>
+          <button style={styles.button} onClick={submitEvent}>
+            {editingId ? "Save Changes" : "Add Event"}
+          </button>
+          {editingId && (
+            <button style={styles.cancelButton} onClick={resetForm}>
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={styles.card}>
@@ -213,9 +248,14 @@ export default function CalendarDay() {
                 </div>
               </div>
 
-              <button style={styles.deleteButton} onClick={() => deleteEvent(ev)}>
-                Delete
-              </button>
+              <div style={styles.eventActions}>
+                <button style={styles.editButton} onClick={() => startEdit(ev)}>
+                  Edit
+                </button>
+                <button style={styles.deleteButton} onClick={() => deleteEvent(ev)}>
+                  Delete
+                </button>
+              </div>
             </div>
           ))
         )}
@@ -240,6 +280,33 @@ const styles = {
     marginBottom: 16
   },
   deleteButton: theme.deleteButton,
+  editButton: {
+    padding: "6px 12px",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    background: colors.border,
+    color: colors.text
+  },
+  eventActions: {
+    display: "flex",
+    gap: 8,
+    flexShrink: 0
+  },
+  formActions: {
+    display: "flex",
+    gap: 10,
+    alignItems: "center"
+  },
+  cancelButton: {
+    padding: "10px 15px",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    background: colors.border,
+    color: colors.text,
+    fontSize: 15
+  },
   error: theme.error,
   tzNote: {
     opacity: 0.6,
