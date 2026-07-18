@@ -201,6 +201,16 @@ export default function CalendarDay() {
                   {ev.end_time ? ` – ${formatTimeInTz(ev.end_time, tz)}` : ""}
                 </div>
                 {ev.description && <div style={styles.eventDesc}>{ev.description}</div>}
+                <div style={styles.eventMeta}>
+                  Added by {ev.created_by_name || "Unknown"}
+                  {ev.created_at
+                    ? ` · ${new Date(ev.created_at).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric"
+                      })}`
+                    : ""}
+                </div>
               </div>
 
               <button style={styles.deleteButton} onClick={() => deleteEvent(ev)}>
@@ -252,5 +262,11 @@ const styles = {
     opacity: 0.6,
     fontSize: 14,
     marginTop: 4
+  },
+  eventMeta: {
+    opacity: 0.5,
+    fontSize: 12,
+    marginTop: 6,
+    fontStyle: "italic"
   }
 };

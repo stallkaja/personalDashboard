@@ -2275,10 +2275,12 @@ def list_events():
     cursor = db.cursor()
 
     cursor.execute("""
-        SELECT id, title, description, start_time, end_time,
-               recurrence_rule, recurrence_end, created_by, created_at, timezone
-        FROM events
-        ORDER BY start_time ASC
+        SELECT e.id, e.title, e.description, e.start_time, e.end_time,
+               e.recurrence_rule, e.recurrence_end, e.created_by, e.created_at,
+               e.timezone, u.username
+        FROM events e
+        LEFT JOIN users u ON u.id = e.created_by
+        ORDER BY e.start_time ASC
     """)
 
     rows = cursor.fetchall()
@@ -2290,7 +2292,8 @@ def list_events():
 
     for r in rows:
         (event_id, title, description, start_time, end_time,
-         recurrence_rule, recurrence_end, created_by, created_at, event_tz) = r
+         recurrence_rule, recurrence_end, created_by, created_at, event_tz,
+         created_by_name) = r
 
         duration = (end_time - start_time) if (end_time and start_time) else None
         occurrence_dates = expand_recurrence(
@@ -2314,6 +2317,7 @@ def list_events():
                 "recurrence_rule": recurrence_rule,
                 "recurrence_end": recurrence_end.isoformat() if recurrence_end else None,
                 "created_by": created_by,
+                "created_by_name": created_by_name,
                 "created_at": created_at.isoformat() if created_at else None
             })
 
