@@ -23,6 +23,23 @@ import { API_URL } from "../config";
 
 const MAX_LIVE_POINTS = 1000;
 
+// A weather station reports every minute or two; if the newest reading is older
+// than this, the live feed is almost certainly broken (station offline or not
+// reaching the server) rather than just quiet.
+const STALE_AFTER_SEC = 900; // 15 minutes
+const LATEST_POLL_MS = 60000;
+
+function formatAgo(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return "just now";
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h ago`;
+}
+
 const RANGES = [
   { label: "24 Hours", hours: 24 },
   { label: "3 Days", hours: 72 },
@@ -55,6 +72,8 @@ export default function WeatherCenter() {
   const navigate = useNavigate();
 
   const [latest, setLatest] = useState(null);
+  const [latestSyncedAt, setLatestSyncedAt] = useState(0);
+  const [nowTick, setNowTick] = useState(Date.now());
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [rangeHours, setRangeHours] = useState(RANGES[0].hours);
@@ -91,6 +110,7 @@ export default function WeatherCenter() {
 
         if (latestJson?.data) {
           setLatest(latestJson.data);
+          setLatestSyncedAt(Date.now());
         }
 
         const statsRes = await fetch(`${API_URL}/stats/today`);
@@ -126,6 +146,30 @@ export default function WeatherCenter() {
     }
 
     loadWeatherCenterData();
+  }, []);
+
+  // Poll /latest as a fallback so current conditions refresh even if the live
+  // socket drops, and a slower tick so the "updated N ago" label keeps moving.
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/latest`);
+        const json = await res.json();
+        if (json?.data) {
+          setLatest(json.data);
+          setLatestSyncedAt(Date.now());
+        }
+      } catch {
+        /* transient network error; next tick retries */
+      }
+    }, LATEST_POLL_MS);
+
+    const tick = setInterval(() => setNowTick(Date.now()), 30000);
+
+    return () => {
+      clearInterval(poll);
+      clearInterval(tick);
+    };
   }, []);
 
   useEffect(() => {
@@ -164,7 +208,8 @@ export default function WeatherCenter() {
     socket.on("weather_update", (msg) => {
       if (!msg || !msg.data) return;
 
-      setLatest({ ...msg.data });
+      setLatest({ ...msg.data, age_seconds: 0 });
+      setLatestSyncedAt(Date.now());
 
       setHistory((prev) => {
         const next = [
@@ -228,9 +273,22 @@ export default function WeatherCenter() {
 
   const activeMetricInfo = METRICS.find((m) => m.key === activeMetric);
 
+  const baseAge = Number.isFinite(latest.age_seconds) ? latest.age_seconds : null;
+  const ageSec =
+    baseAge == null ? null : baseAge + Math.max(0, (nowTick - latestSyncedAt) / 1000);
+  const isStale = ageSec != null && ageSec > STALE_AFTER_SEC;
+
   return (
     <div style={{ ...styles.page, padding: isMobile ? 12 : 20 }}>
       <h1>🌎 Weather Center</h1>
+
+      {ageSec != null && (
+        <div style={isStale ? styles.staleBanner : styles.freshNote}>
+          {isStale
+            ? `⚠️ Live weather data looks stale — the newest reading is from ${formatAgo(ageSec)}. The weather station may be offline or not reaching the server.`
+            : `● Live · updated ${formatAgo(ageSec)}`}
+        </div>
+      )}
 
       {alerts.length > 0 && (
         <div style={styles.alertBox}>
@@ -441,6 +499,21 @@ export default function WeatherCenter() {
 const styles = {
   page: theme.page,
   loading: theme.loading,
+  staleBanner: {
+    background: colors.danger,
+    border: "1px solid #ef4444",
+    borderRadius: 10,
+    padding: "12px 16px",
+    marginBottom: 16,
+    fontSize: 14,
+    lineHeight: 1.5
+  },
+  freshNote: {
+    color: colors.success,
+    fontSize: 13,
+    marginBottom: 16,
+    opacity: 0.85
+  },
   alertBox: {
     background: colors.danger,
     border: "1px solid #ef4444",

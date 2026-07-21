@@ -1032,7 +1032,8 @@ def latest():
 
     cursor.execute("""
         SELECT timestamp, tempf, humidity, windspeedmph,
-               windgustmph, winddir, uv, baromrelin, dailyrainin, solarradiation
+               windgustmph, winddir, uv, baromrelin, dailyrainin, solarradiation,
+               TIMESTAMPDIFF(SECOND, timestamp, NOW())
         FROM readings
         ORDER BY timestamp DESC
         LIMIT 1
@@ -1052,6 +1053,7 @@ def latest():
     return {
         "data": {
             "timestamp": row[0].isoformat() if row[0] else None,
+            "age_seconds": int(row[10]) if row[10] is not None else None,
             "tempf": tempf,
             "humidity": humidity,
             "windspeedmph": windspeedmph,
@@ -1071,6 +1073,17 @@ def latest():
 def ingest():
     args = request.args.to_dict()
     args.pop("PASSKEY", None)
+
+    # Guard against empty hits (a bare GET/HEAD, health check, or misconfigured
+    # station with no fields). Without this, missing values coerce to 0 and we
+    # store a garbage all-zero reading that then shows up as the "latest"
+    # conditions. Only insert when at least one real weather field is present.
+    has_reading = any(
+        safe_float(args.get(k), None) is not None
+        for k in ("tempf", "humidity", "baromrelin", "windspeedmph", "solarradiation")
+    )
+    if not has_reading:
+        return "OK", 200
 
     tempf = safe_float(args.get("tempf"))
     humidity = safe_float(args.get("humidity"))
