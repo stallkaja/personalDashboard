@@ -13,6 +13,27 @@ const ICE_SERVERS = [
   { urls: "stun:stun1.l.google.com:19302" }
 ];
 
+// Turn a getUserMedia DOMException into a specific, actionable message.
+function mediaErrorMessage(err) {
+  switch (err?.name) {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+      return "Camera/microphone access is blocked. Tap the camera/lock icon in your browser's address bar (or the site's permission settings) to allow it, then try again.";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "No camera or microphone was found on this device.";
+    case "NotReadableError":
+    case "TrackStartError":
+      return "Your camera or microphone is already in use by another app. Close it and try again.";
+    case "OverconstrainedError":
+      return "No camera/microphone matches the requested settings.";
+    case "SecurityError":
+      return "Media access is blocked by browser security — the page must be served over HTTPS.";
+    default:
+      return `Could not access camera/microphone (${err?.name || "unknown error"}). Check the site's camera/mic permissions and try again.`;
+  }
+}
+
 export default function VideoCall() {
   const { token, user } = useAuth();
   const isMobile = useIsMobile();
@@ -109,6 +130,18 @@ export default function VideoCall() {
   const join = async () => {
     if (!room.trim()) { setError("Enter a room name."); return; }
     setError("");
+
+    // Browsers only expose getUserMedia in a "secure context" — HTTPS or
+    // localhost. Over plain HTTP (e.g. a http://192.168.x.x LAN address) the
+    // API isn't available at all, so no permission prompt ever appears.
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setError(
+        `Video calls need a secure (HTTPS) connection, but this page is loaded over "${window.location.origin}". ` +
+        "Open the dashboard at its https:// address (e.g. https://s-dashboard.com) and try again."
+      );
+      return;
+    }
+
     setConnecting(true);
 
     try {
@@ -117,7 +150,7 @@ export default function VideoCall() {
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
     } catch (err) {
       setConnecting(false);
-      setError("Could not access camera/microphone. Please grant permission and try again.");
+      setError(mediaErrorMessage(err));
       return;
     }
 
