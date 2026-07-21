@@ -2072,6 +2072,41 @@ def admin_db_query():
     return result
 
 
+@app.route("/admin/restart", methods=["POST"])
+@jwt_required()
+def admin_restart():
+    """Restart the whole app (both NSSM services). Admin + server-machine only.
+
+    A detached PowerShell does the work after a short delay so this request can
+    return first; it restarts the frontend, then the backend. NSSM is set to
+    auto-restart on exit, so even if the service-control call is a no-op the
+    backend comes back on its own."""
+    blocked = _require_db_admin()
+    if blocked:
+        return blocked
+
+    ps_command = (
+        "Start-Sleep -Seconds 2; "
+        "Restart-Service Dashboard-Frontend -Force -ErrorAction SilentlyContinue; "
+        "Restart-Service Dashboard-Backend -Force -ErrorAction SilentlyContinue"
+    )
+    flags = (
+        getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_command],
+            creationflags=flags,
+            close_fds=True,
+        )
+    except Exception as e:
+        return {"error": f"Could not trigger restart: {e}"}, 500
+
+    return {"message": "Restarting the application — services will be back in a few seconds."}
+
+
 @app.route("/admin/users", methods=["GET"])
 @jwt_required()
 def admin_users():

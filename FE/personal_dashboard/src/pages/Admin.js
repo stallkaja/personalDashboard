@@ -12,6 +12,7 @@ const SECTIONS = [
   { key: "create", label: "Create User", icon: "➕" },
   { key: "invite", label: "Invite", icon: "✉️" },
   { key: "database", label: "Database", icon: "🗄️" },
+  { key: "system", label: "System", icon: "🔄" },
   { key: "session", label: "My Session", icon: "🔑" }
 ];
 
@@ -32,6 +33,8 @@ export default function Admin() {
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSending, setInviteSending] = useState(false);
+
+  const [restarting, setRestarting] = useState(false);
 
   const authHeaders = useMemo(() => ({
     "Content-Type": "application/json",
@@ -268,6 +271,33 @@ export default function Admin() {
     window.location.href = "/login";
   };
 
+  const restartApp = async () => {
+    if (!window.confirm(
+      "Restart the entire application now?\n\nThe dashboard (backend and frontend) will be unavailable for everyone for a few seconds while the services come back."
+    )) return;
+
+    setRestarting(true);
+    setError("");
+    setStatus("");
+
+    try {
+      const res = await fetch(`${API_URL}/admin/restart`, {
+        method: "POST",
+        headers: authHeaders
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Failed to trigger restart.");
+        setRestarting(false);
+        return;
+      }
+      setStatus(data.message || "Restart triggered. The app will be back shortly.");
+    } catch {
+      // The backend often drops the connection as it restarts — that's expected.
+      setStatus("Restart triggered. The app will be back in a few seconds — reload the page shortly.");
+    }
+  };
+
   const changeSection = (key) => {
     setSection(key);
     setError("");
@@ -457,6 +487,24 @@ export default function Admin() {
     </div>
   );
 
+  const renderSystem = () => (
+    <div style={styles.card}>
+      <h2 style={styles.h2}>Restart Application</h2>
+      <p style={styles.muted}>
+        Restarts the backend and frontend services. Use this if the app is misbehaving or after a
+        change that needs a fresh start. The dashboard will be unavailable for everyone for a few
+        seconds while it comes back.
+      </p>
+      <button
+        style={{ ...styles.dangerButton, padding: "10px 16px", fontSize: 15, opacity: restarting ? 0.6 : 1 }}
+        onClick={restartApp}
+        disabled={restarting}
+      >
+        {restarting ? "Restarting…" : "🔄 Restart Application"}
+      </button>
+    </div>
+  );
+
   const renderSession = () => (
     <div style={styles.card}>
       <h2 style={styles.h2}>Current Admin</h2>
@@ -473,6 +521,7 @@ export default function Admin() {
       case "create": return renderCreate();
       case "invite": return renderInvite();
       case "database": return renderDatabase();
+      case "system": return renderSystem();
       case "session": return renderSession();
       default: return renderUsers();
     }
