@@ -81,7 +81,7 @@ export default function MealPlanner() {
 
   return (
     <div style={{ ...styles.page, padding: isMobile ? 10 : 20 }}>
-      <h1>🍽️ Meal Planner</h1>
+      <h1>🍽️ Menu</h1>
 
       {error && <div style={styles.error}>{error}</div>}
 

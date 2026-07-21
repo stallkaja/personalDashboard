@@ -108,7 +108,7 @@ export default function Dashboard() {
           </Link>
 
           <Link to="/meal-planner" style={styles.secondaryButton}>
-            Meal Planner
+            Menu
           </Link>
 
           <Link to="/shopping-list" style={styles.secondaryButton}>
@@ -201,7 +201,7 @@ export default function Dashboard() {
             ))
           )}
 
-          <Link to="/meal-planner" style={styles.cardLink}>Open Meal Planner →</Link>
+          <Link to="/meal-planner" style={styles.cardLink}>Open Menu →</Link>
         </div>
       </div>
     </div>

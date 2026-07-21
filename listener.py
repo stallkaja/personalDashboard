@@ -1,6 +1,6 @@
 from flask import Flask, request, send_from_directory, send_file
 from flask_cors import CORS
-from flask_socketio import SocketIO, disconnect
+from flask_socketio import SocketIO, disconnect, join_room, leave_room, emit
 from flask_jwt_extended import (
     JWTManager,
     create_access_token,
@@ -788,6 +788,14 @@ socketio = SocketIO(
 )
 
 
+# Video-call signaling state. socket_users maps a socket id to its username;
+# video_rooms_by_sid maps a socket id to the call room it has joined. The
+# server only relays WebRTC offers/answers/ICE between peers — media itself is
+# peer-to-peer and never touches the server.
+socket_users = {}
+video_rooms_by_sid = {}
+
+
 @socketio.on("connect")
 def handle_socket_connect(auth):
     if not auth or "token" not in auth:
@@ -797,6 +805,7 @@ def handle_socket_connect(auth):
 
     try:
         decoded = decode_token(auth["token"])
+        socket_users[request.sid] = decoded.get("username") or "Guest"
         print("Socket authenticated:", {
             "id": decoded.get("sub"),
             "username": decoded.get("username"),
@@ -805,6 +814,67 @@ def handle_socket_connect(auth):
     except Exception as e:
         print("Socket rejected:", e)
         disconnect()
+
+
+@socketio.on("disconnect")
+def handle_socket_disconnect():
+    sid = request.sid
+    info = video_rooms_by_sid.pop(sid, None)
+    if info:
+        emit("video_peer_left", {"sid": sid}, to=info["room"])
+    socket_users.pop(sid, None)
+
+
+@socketio.on("video_join")
+def handle_video_join(data):
+    room = ((data or {}).get("room") or "").strip()
+    if not room:
+        return
+    sid = request.sid
+    username = socket_users.get(sid, "Guest")
+
+    # Existing members of the room — the joiner will initiate an offer to each.
+    peers = [
+        {"sid": s, "username": socket_users.get(s, "Guest")}
+        for s, info in video_rooms_by_sid.items()
+        if info["room"] == room and s != sid
+    ]
+
+    join_room(room)
+    video_rooms_by_sid[sid] = {"room": room}
+
+    emit("video_peers", {"peers": peers})
+    emit(
+        "video_peer_joined",
+        {"sid": sid, "username": username},
+        to=room,
+        include_self=False,
+    )
+
+
+@socketio.on("video_signal")
+def handle_video_signal(data):
+    target = (data or {}).get("to")
+    if not target:
+        return
+    emit(
+        "video_signal",
+        {
+            "from": request.sid,
+            "username": socket_users.get(request.sid, "Guest"),
+            "signal": (data or {}).get("signal"),
+        },
+        to=target,
+    )
+
+
+@socketio.on("video_leave")
+def handle_video_leave(data):
+    sid = request.sid
+    info = video_rooms_by_sid.pop(sid, None)
+    if info:
+        leave_room(info["room"])
+        emit("video_peer_left", {"sid": sid}, to=info["room"])
 
 
 @app.route("/")

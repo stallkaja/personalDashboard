@@ -11,11 +11,11 @@ const LINKS = [
   { to: "/weather-center", label: "Weather Center", icon: "🌤️" },
   { to: "/calendar", label: "Calendar", icon: "📅" },
   { to: "/chores", label: "Chores", icon: "🧹" },
-  { to: "/meal-planner", label: "Meals", icon: "🍽️" },
-  { to: "/drinks", label: "Drinks", icon: "🍹" },
+  { to: "/meal-planner", label: "Menu", icon: "🍽️" },
   { to: "/shopping-list", label: "Shopping List", icon: "🛒" },
   { to: "/photo-gallery", label: "Photos", icon: "🖼️" },
   { to: "/communication", label: "Messages", icon: "💬" },
+  { to: "/video-call", label: "Video Call", icon: "📹" },
   { to: "/career", label: "Job Search", icon: "💼" },
   { to: "/accounts", label: "Accounts", icon: "👤" },
   { to: "/settings", label: "Settings", icon: "⚙️" }

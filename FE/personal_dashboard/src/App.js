@@ -28,12 +28,12 @@ import Chores from "./pages/Chores";
 import ChoreDay from "./pages/ChoreDay";
 import MealPlanner from "./pages/MealPlanner";
 import MealDay from "./pages/MealDay";
-import Drinks from "./pages/Drinks";
 import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
 import Career from "./pages/Career";
 import Communication from "./pages/Communication";
+import VideoCall from "./pages/VideoCall";
 import DatabaseManager from "./pages/DatabaseManager";
 
 function App() {
@@ -144,15 +144,6 @@ function App() {
           />
 
           <Route
-            path="/drinks"
-            element={
-              <ProtectedRoute>
-                <Drinks />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
             path="/shopping-list"
             element={
               <ProtectedRoute>
@@ -193,6 +184,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <Communication />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/video-call"
+            element={
+              <ProtectedRoute>
+                <VideoCall />
               </ProtectedRoute>
             }
           />
