@@ -12,6 +12,7 @@ const SECTIONS = [
   { key: "create", label: "Create User", icon: "➕" },
   { key: "invite", label: "Invite", icon: "✉️" },
   { key: "database", label: "Database", icon: "🗄️" },
+  { key: "video_activity", label: "Video Activity", icon: "📺" },
   { key: "system", label: "System", icon: "🔄" },
   { key: "session", label: "My Session", icon: "🔑" }
 ];
@@ -35,6 +36,9 @@ export default function Admin() {
   const [inviteSending, setInviteSending] = useState(false);
 
   const [restarting, setRestarting] = useState(false);
+
+  const [videoActivity, setVideoActivity] = useState([]);
+  const [videoActivityLoading, setVideoActivityLoading] = useState(false);
 
   const authHeaders = useMemo(() => ({
     "Content-Type": "application/json",
@@ -80,6 +84,33 @@ export default function Admin() {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  const loadVideoActivity = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      setVideoActivityLoading(true);
+      setError("");
+
+      const res = await fetch(`${API_URL}/admin/video-activity`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setVideoActivity([]);
+        setError(data.error || "Failed to load video activity");
+        return;
+      }
+
+      setVideoActivity(Array.isArray(data.activity) ? data.activity : []);
+    } catch (err) {
+      console.error(err);
+      setError("Network error loading video activity");
+    } finally {
+      setVideoActivityLoading(false);
+    }
+  }, [token]);
 
   const createUser = async () => {
     if (!newUsername.trim() || !newPassword.trim()) {
@@ -302,6 +333,7 @@ export default function Admin() {
     setSection(key);
     setError("");
     setStatus("");
+    if (key === "video_activity") loadVideoActivity();
   };
 
   // ---- section renderers --------------------------------------------------
@@ -487,6 +519,64 @@ export default function Admin() {
     </div>
   );
 
+  const renderVideoActivity = () => (
+    <div style={styles.card}>
+      <div style={styles.headerRow}>
+        <div>
+          <h2 style={styles.h2}>Video Activity</h2>
+          <p style={styles.muted}>Most recent {videoActivity.length} watch event(s)</p>
+        </div>
+        <button style={styles.button} onClick={loadVideoActivity}>Refresh</button>
+      </div>
+
+      {videoActivityLoading && <p>Loading activity...</p>}
+
+      {!videoActivityLoading && videoActivity.length === 0 ? (
+        <p style={styles.muted}>No video activity recorded yet.</p>
+      ) : isMobile ? (
+        <div>
+          {videoActivity.map((a) => (
+            <div key={a.id} style={styles.userCard}>
+              <div style={styles.userCardHeader}>
+                <strong>{a.username}</strong>
+                <span style={styles.statusBadge}>{a.video_source}</span>
+              </div>
+              <div style={styles.userCardMeta}>{a.video_label}</div>
+              <div style={styles.userCardMeta}>
+                {a.started_at ? new Date(a.started_at).toLocaleString() : "N/A"}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>User</th>
+                <th style={styles.th}>Video</th>
+                <th style={styles.th}>Source</th>
+                <th style={styles.th}>Watched At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {videoActivity.map((a) => (
+                <tr key={a.id}>
+                  <td style={styles.td}>{a.username}</td>
+                  <td style={styles.td}>{a.video_label}</td>
+                  <td style={styles.td}>{a.video_source}</td>
+                  <td style={styles.td}>
+                    {a.started_at ? new Date(a.started_at).toLocaleString() : "N/A"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
   const renderSystem = () => (
     <div style={styles.card}>
       <h2 style={styles.h2}>Restart Application</h2>
@@ -521,6 +611,7 @@ export default function Admin() {
       case "create": return renderCreate();
       case "invite": return renderInvite();
       case "database": return renderDatabase();
+      case "video_activity": return renderVideoActivity();
       case "system": return renderSystem();
       case "session": return renderSession();
       default: return renderUsers();

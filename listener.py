@@ -444,6 +444,18 @@ def ensure_feature_tables():
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS video_activity (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            video_source VARCHAR(20) NOT NULL,
+            video_label VARCHAR(255) NOT NULL,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_video_activity_user (user_id),
+            INDEX idx_video_activity_started (started_at)
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS video_requests (
             id INT AUTO_INCREMENT PRIMARY KEY,
             title VARCHAR(255) NOT NULL,
@@ -3688,6 +3700,77 @@ def delete_video_request(request_id):
     db.close()
 
     return {"message": "Request deleted"}
+
+
+VIDEO_SOURCES = ("upload", "local")
+
+
+@app.route("/video-activity", methods=["POST"])
+@jwt_required()
+def log_video_activity():
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    data = request.json or {}
+    video_source = data.get("video_source")
+    video_label = data.get("video_label")
+
+    if video_source not in VIDEO_SOURCES or not video_label:
+        return {"error": "video_source and video_label are required"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO video_activity (user_id, video_source, video_label)
+        VALUES (%s, %s, %s)
+        """,
+        (user_id, video_source, video_label)
+    )
+
+    db.commit()
+    cursor.close()
+    db.close()
+
+    return {"message": "Logged"}, 201
+
+
+@app.route("/admin/video-activity", methods=["GET"])
+@jwt_required()
+def admin_video_activity():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute("""
+        SELECT a.id, a.video_source, a.video_label, a.started_at, a.user_id, u.username
+        FROM video_activity a
+        LEFT JOIN users u ON u.id = a.user_id
+        ORDER BY a.started_at DESC
+        LIMIT 200
+    """)
+
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {
+        "count": len(rows),
+        "activity": [
+            {
+                "id": r[0],
+                "video_source": r[1],
+                "video_label": r[2],
+                "started_at": r[3].isoformat() if r[3] else None,
+                "user_id": r[4],
+                "username": r[5] or "Unknown"
+            }
+            for r in rows
+        ]
+    }
 
 
 def resolve_local_video_path(relpath):

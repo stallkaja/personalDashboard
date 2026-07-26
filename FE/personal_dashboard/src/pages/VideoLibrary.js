@@ -40,6 +40,24 @@ export default function VideoLibrary() {
   const [requestError, setRequestError] = useState("");
   const [requestSubmitting, setRequestSubmitting] = useState(false);
 
+  const loggedPlaysRef = useRef(new Set());
+
+  const logVideoActivity = (videoSource, videoLabel, dedupeKey) => {
+    if (dedupeKey) {
+      if (loggedPlaysRef.current.has(dedupeKey)) return;
+      loggedPlaysRef.current.add(dedupeKey);
+    }
+
+    fetch(`${API_URL}/video-activity`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ video_source: videoSource, video_label: videoLabel })
+    }).catch(() => {});
+  };
+
   const loadLocalVideos = async (path) => {
     setLocalLoading(true);
     setLocalError("");
@@ -439,7 +457,13 @@ export default function VideoLibrary() {
 
                       <div style={styles.localActions}>
                         {video.playable_in_browser ? (
-                          <button style={styles.button} onClick={() => setNowPlaying(video)}>
+                          <button
+                            style={styles.button}
+                            onClick={() => {
+                              setNowPlaying(video);
+                              logVideoActivity("local", video.name, `local:${video.path}`);
+                            }}
+                          >
                             ▶ Play
                           </button>
                         ) : video.conversion_status === "queued" ? (
@@ -530,7 +554,18 @@ export default function VideoLibrary() {
           <div style={styles.list}>
             {videos.map((video) => (
               <div key={video.id} style={styles.videoCard}>
-                <video controls style={styles.video} preload="metadata">
+                <video
+                  controls
+                  style={styles.video}
+                  preload="metadata"
+                  onPlay={() =>
+                    logVideoActivity(
+                      "upload",
+                      video.original_name || "Video",
+                      `upload:${video.id}`
+                    )
+                  }
+                >
                   <source src={`${API_URL}${video.url}`} />
                   Your browser does not support video playback.
                 </video>
