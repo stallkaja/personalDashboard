@@ -444,6 +444,17 @@ def ensure_feature_tables():
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS video_requests (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            note TEXT,
+            status VARCHAR(20) DEFAULT 'pending',
+            requested_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS resumes (
             id INT AUTO_INCREMENT PRIMARY KEY,
             filename VARCHAR(255) NOT NULL,
@@ -3555,6 +3566,128 @@ def delete_video(video_id):
         os.remove(file_path)
 
     return {"message": "Video deleted"}
+
+
+@app.route("/video-requests", methods=["GET"])
+@jwt_required()
+def list_video_requests():
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute("""
+        SELECT r.id, r.title, r.note, r.status, r.requested_by, r.created_at, u.username
+        FROM video_requests r
+        LEFT JOIN users u ON u.id = r.requested_by
+        ORDER BY r.status ASC, r.created_at ASC
+    """)
+
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {
+        "requests": [
+            {
+                "id": r[0],
+                "title": r[1],
+                "note": r[2],
+                "status": r[3],
+                "requested_by": r[4],
+                "created_at": r[5].isoformat() if r[5] else None,
+                "requested_by_name": r[6]
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.route("/video-requests", methods=["POST"])
+@jwt_required()
+def create_video_request():
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    data = request.json or {}
+    title = data.get("title")
+
+    if not title:
+        return {"error": "title is required"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO video_requests (title, note, requested_by)
+        VALUES (%s, %s, %s)
+        """,
+        (title, data.get("note"), user_id)
+    )
+
+    db.commit()
+    new_id = cursor.lastrowid
+    cursor.close()
+    db.close()
+
+    return {"id": new_id}, 201
+
+
+@app.route("/video-requests/<int:request_id>/toggle", methods=["PUT"])
+@jwt_required()
+def toggle_video_request(request_id):
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute("SELECT status FROM video_requests WHERE id=%s", (request_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor.close()
+        db.close()
+        return {"error": "Request not found"}, 404
+
+    new_status = "pending" if row[0] == "fulfilled" else "fulfilled"
+
+    cursor.execute(
+        "UPDATE video_requests SET status=%s WHERE id=%s",
+        (new_status, request_id)
+    )
+
+    db.commit()
+    cursor.close()
+    db.close()
+
+    return {"message": "Request updated", "status": new_status}
+
+
+@app.route("/video-requests/<int:request_id>", methods=["DELETE"])
+@jwt_required()
+def delete_video_request(request_id):
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute("SELECT requested_by FROM video_requests WHERE id=%s", (request_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor.close()
+        db.close()
+        return {"error": "Request not found"}, 404
+
+    if row[0] != user_id and not admin_required():
+        cursor.close()
+        db.close()
+        return {"error": "You can only delete your own requests"}, 403
+
+    cursor.execute("DELETE FROM video_requests WHERE id=%s", (request_id,))
+    db.commit()
+    cursor.close()
+    db.close()
+
+    return {"message": "Request deleted"}
 
 
 def resolve_local_video_path(relpath):

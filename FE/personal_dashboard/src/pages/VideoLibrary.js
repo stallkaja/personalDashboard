@@ -34,6 +34,12 @@ export default function VideoLibrary() {
   const [localError, setLocalError] = useState("");
   const [nowPlaying, setNowPlaying] = useState(null);
 
+  const [videoRequests, setVideoRequests] = useState([]);
+  const [requestTitle, setRequestTitle] = useState("");
+  const [requestNote, setRequestNote] = useState("");
+  const [requestError, setRequestError] = useState("");
+  const [requestSubmitting, setRequestSubmitting] = useState(false);
+
   const loadLocalVideos = async (path) => {
     setLocalLoading(true);
     setLocalError("");
@@ -159,6 +165,85 @@ export default function VideoLibrary() {
     if (token) loadVideos();
   }, [token]);
 
+  const loadVideoRequests = async () => {
+    try {
+      const res = await fetch(`${API_URL}/video-requests`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setVideoRequests(data.requests || []);
+    } catch {
+      setRequestError("Failed to load requests.");
+    }
+  };
+
+  useEffect(() => {
+    if (token) loadVideoRequests();
+  }, [token]);
+
+  const submitVideoRequest = async () => {
+    setRequestError("");
+
+    if (!requestTitle.trim()) {
+      setRequestError("Enter a title for the request.");
+      return;
+    }
+
+    setRequestSubmitting(true);
+
+    try {
+      const res = await fetch(`${API_URL}/video-requests`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ title: requestTitle.trim(), note: requestNote.trim() || null })
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRequestError(data.error || "Failed to submit request.");
+        setRequestSubmitting(false);
+        return;
+      }
+
+      setRequestTitle("");
+      setRequestNote("");
+      setRequestSubmitting(false);
+      loadVideoRequests();
+    } catch {
+      setRequestError("Network error submitting request.");
+      setRequestSubmitting(false);
+    }
+  };
+
+  const toggleVideoRequest = async (id) => {
+    try {
+      await fetch(`${API_URL}/video-requests/${id}/toggle`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      loadVideoRequests();
+    } catch {
+      setRequestError("Failed to update request.");
+    }
+  };
+
+  const deleteVideoRequest = async (id) => {
+    if (!window.confirm("Delete this request?")) return;
+
+    try {
+      await fetch(`${API_URL}/video-requests/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      loadVideoRequests();
+    } catch {
+      setRequestError("Failed to delete request.");
+    }
+  };
+
   const uploadVideo = async () => {
     setError("");
 
@@ -247,6 +332,15 @@ export default function VideoLibrary() {
               Local Folder
             </button>
           )}
+
+          <button
+            style={tab === "requests" ? styles.tabActive : styles.tab}
+            onClick={() => setTab("requests")}
+          >
+            Requests
+            {videoRequests.filter((r) => r.status === "pending").length > 0 &&
+              ` (${videoRequests.filter((r) => r.status === "pending").length})`}
+          </button>
         </div>
 
         {tab === "local" ? (
@@ -373,6 +467,59 @@ export default function VideoLibrary() {
               )}
             </div>
           </>
+        ) : tab === "requests" ? (
+          <div style={styles.requestsSection}>
+            {requestError && <div style={styles.error}>{requestError}</div>}
+
+            <div style={styles.requestForm}>
+              <input
+                style={styles.input}
+                placeholder="Video or movie title"
+                value={requestTitle}
+                onChange={(e) => setRequestTitle(e.target.value)}
+              />
+              <input
+                style={styles.input}
+                placeholder="Note (optional)"
+                value={requestNote}
+                onChange={(e) => setRequestNote(e.target.value)}
+              />
+              <button style={styles.button} onClick={submitVideoRequest} disabled={requestSubmitting}>
+                {requestSubmitting ? "Submitting..." : "Submit Request"}
+              </button>
+            </div>
+
+            {videoRequests.length === 0 ? (
+              <p>No video requests yet.</p>
+            ) : (
+              <div style={styles.list}>
+                {videoRequests.map((req) => (
+                  <div key={req.id} style={styles.requestRow}>
+                    <div>
+                      <div style={req.status === "fulfilled" ? styles.requestTitleDone : styles.requestTitle}>
+                        {req.title}
+                      </div>
+                      {req.note && <div style={styles.caption}>{req.note}</div>}
+                      <div style={styles.fileSize}>
+                        Requested by {req.requested_by_name || "Unknown"}
+                      </div>
+                    </div>
+
+                    <div style={styles.requestActions}>
+                      <button style={styles.tab} onClick={() => toggleVideoRequest(req.id)}>
+                        {req.status === "fulfilled" ? "Mark Pending" : "Mark Fulfilled"}
+                      </button>
+                      {(req.requested_by === user?.id || isAdmin) && (
+                        <button style={styles.deleteButton} onClick={() => deleteVideoRequest(req.id)}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         ) : videos.length === 0 ? (
           <p>
             {tab === "mine"
@@ -614,5 +761,39 @@ const styles = {
     fontSize: 11,
     color: colors.dangerSolid,
     cursor: "help"
+  },
+  requestsSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 16
+  },
+  requestForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10
+  },
+  requestRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    background: colors.surfaceMuted,
+    borderRadius: 12,
+    padding: 14,
+    border: `1px solid ${colors.border}`
+  },
+  requestTitle: {
+    fontWeight: "bold"
+  },
+  requestTitleDone: {
+    fontWeight: "bold",
+    textDecoration: "line-through",
+    opacity: 0.6
+  },
+  requestActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0
   }
 };
