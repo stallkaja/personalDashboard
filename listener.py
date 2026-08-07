@@ -1241,6 +1241,51 @@ def ingest():
     return "OK"
 
 
+@app.route("/export/readings.csv", methods=["GET"])
+@jwt_required()
+def export_readings_csv():
+    """Download raw weather readings as CSV for the last N hours (default 7 days)."""
+    import csv as _csv
+    import io as _io
+
+    try:
+        hours = int(request.args.get("hours", 168))
+    except (TypeError, ValueError):
+        hours = 168
+    hours = max(1, min(hours, 24 * 366))
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT timestamp, tempf, humidity, windspeedmph, windgustmph,
+               winddir, uv, solarradiation, baromrelin, dailyrainin
+        FROM readings
+        WHERE timestamp >= (NOW() - INTERVAL %s HOUR)
+        ORDER BY timestamp ASC
+    """, (hours,))
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow([
+        "timestamp", "temperature_f", "humidity_pct", "wind_mph", "gust_mph",
+        "wind_dir_deg", "uv_index", "solar_wm2", "pressure_inhg", "rain_daily_in"
+    ])
+    for r in rows:
+        writer.writerow([
+            r[0].isoformat() if r[0] else "",
+            *["" if v is None else v for v in r[1:]]
+        ])
+
+    return app.response_class(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="weather-history-{hours}h.csv"'}
+    )
+
+
 HISTORY_TARGET_POINTS = 300
 
 
@@ -4022,6 +4067,98 @@ def _conversion_worker():
 
 
 threading.Thread(target=_conversion_worker, daemon=True).start()
+
+
+# --- Ambient Weather cloud polling ----------------------------------------
+# Pull the station's latest reading from the Ambient Weather API and store it,
+# so the dashboard stays fed with live data regardless of where the station's
+# own uploads go. Inert until both keys are configured in secrets.json:
+#   "AMBIENT_API_KEY", "AMBIENT_APPLICATION_KEY"
+# (generate them at ambientweather.net -> Account -> API Keys).
+AMBIENT_API_KEY = _secret("AMBIENT_API_KEY", "")
+AMBIENT_APPLICATION_KEY = _secret("AMBIENT_APPLICATION_KEY", "")
+AMBIENT_POLL_SECONDS = 60
+_ambient_last_dateutc = None
+
+
+def _store_reading(vals):
+    """Insert one reading and broadcast it. `vals` uses Ambient/Ecowitt field
+    names (tempf, humidity, windspeedmph, baromrelin, ...)."""
+    tempf = vals.get("tempf")
+    humidity = vals.get("humidity")
+    windspeed = vals.get("windspeedmph")
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        INSERT INTO readings (timestamp, tempf, humidity, windspeedmph,
+            windgustmph, winddir, uv, solarradiation, baromrelin, dailyrainin)
+        VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        tempf, humidity, windspeed, vals.get("windgustmph"), vals.get("winddir"),
+        vals.get("uv"), vals.get("solarradiation"), vals.get("baromrelin"),
+        vals.get("dailyrainin")
+    ))
+    db.commit()
+    cursor.close()
+    db.close()
+
+    socketio.emit("weather_update", {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "data": {
+            "tempf": tempf,
+            "humidity": humidity,
+            "windspeedmph": windspeed,
+            "windgustmph": vals.get("windgustmph"),
+            "winddir": vals.get("winddir"),
+            "uv": vals.get("uv"),
+            "solarradiation": vals.get("solarradiation"),
+            "baromrelin": vals.get("baromrelin"),
+            "dailyrainin": vals.get("dailyrainin"),
+            "dewpoint": compute_dewpoint(tempf, humidity),
+            "feels_like": compute_feels_like(tempf, humidity, windspeed),
+        }
+    })
+
+
+def poll_ambient_weather():
+    global _ambient_last_dateutc
+
+    if not (AMBIENT_API_KEY and AMBIENT_APPLICATION_KEY):
+        print("[ambient] API keys not configured; cloud polling disabled")
+        return
+
+    import time as _time
+    print("[ambient] cloud polling enabled")
+
+    while True:
+        try:
+            resp = requests.get(
+                "https://api.ambientweather.net/v1/devices",
+                params={
+                    "applicationKey": AMBIENT_APPLICATION_KEY,
+                    "apiKey": AMBIENT_API_KEY,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                devices = resp.json() or []
+                if devices:
+                    last = devices[0].get("lastData") or {}
+                    dateutc = last.get("dateutc")
+                    # Only store genuinely new readings.
+                    if dateutc and dateutc != _ambient_last_dateutc:
+                        _ambient_last_dateutc = dateutc
+                        _store_reading(last)
+            else:
+                print("[ambient] API returned", resp.status_code, resp.text[:200])
+        except Exception as e:
+            print("[ambient] poll error:", e)
+
+        _time.sleep(AMBIENT_POLL_SECONDS)
+
+
+threading.Thread(target=poll_ambient_weather, daemon=True).start()
 
 
 @app.route("/local-videos/convert", methods=["POST"])

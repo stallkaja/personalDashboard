@@ -83,6 +83,30 @@ export default function WeatherCenter() {
   const [records, setRecords] = useState(null);
   const [appSettings, setAppSettings] = useState(null);
   const [forecast, setForecast] = useState(null);
+  const [exporting, setExporting] = useState(false);
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch(`${API_URL}/export/readings.csv?hours=${rangeHours}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `weather-history-${rangeHours}h.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("CSV export failed:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const loadHistory = useCallback(async (hours) => {
     setHistoryLoading(true);
@@ -434,7 +458,12 @@ export default function WeatherCenter() {
       )}
 
       <div style={styles.historyHeader}>
-        <h2>History</h2>
+        <div style={styles.historyTitleRow}>
+          <h2 style={{ margin: 0 }}>History</h2>
+          <button style={styles.exportButton} onClick={exportCsv} disabled={exporting}>
+            {exporting ? "Exporting…" : "⬇ Export CSV"}
+          </button>
+        </div>
 
         <div style={styles.rangeSelector}>
           {RANGES.map((range) => (
@@ -540,6 +569,24 @@ const styles = {
   },
   historyHeader: {
     marginBottom: 20
+  },
+  historyTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+    flexWrap: "wrap"
+  },
+  exportButton: {
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    background: colors.primary,
+    color: colors.primaryText,
+    fontWeight: "bold",
+    fontSize: 14
   },
   rangeSelector: {
     display: "flex",

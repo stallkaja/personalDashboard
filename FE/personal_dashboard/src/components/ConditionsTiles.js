@@ -1,11 +1,18 @@
-import { CircularProgressbarWithChildren, buildStyles } from "react-circular-progressbar";
+import { CircularProgressbar, buildStyles } from "react-circular-progressbar";
 import "react-circular-progressbar/dist/styles.css";
 import { colors } from "../styles/theme";
 
-// Ambient-Weather-style live dashboard: a uniform grid of sensor tiles, each
-// focused on one reading with a big readout or a gauge dial.
+// Ambient-Weather-style live dashboard: a uniform grid of sensor tiles. Each
+// tile shows a graphic (a gauge dial or compass) AND the actual reading as a
+// large, always-visible number so the value is never hidden inside the SVG.
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+// Format a numeric value; shows an em dash if the value is missing.
+const fmt = (n, dp = 0) =>
+  n === null || n === undefined || Number.isNaN(Number(n))
+    ? "—"
+    : Number(n).toFixed(dp);
 
 function uvInfo(uv) {
   if (uv >= 11) return { label: "Extreme", color: "#a855f7" };
@@ -25,28 +32,32 @@ function Tile({ title, accent, children }) {
   return (
     <div style={styles.tile}>
       <div style={{ ...styles.tileTitle, color: accent || colors.textMuted }}>{title}</div>
-      {children}
+      <div style={styles.tileBody}>{children}</div>
     </div>
   );
 }
 
-function Gauge({ percent, color, big, small }) {
+// A gauge dial (graphic) with the value shown as large text beneath it.
+function GaugeTile({ title, accent, percent, color, value, unit, caption }) {
   return (
-    <div style={styles.gaugeWrap}>
-      <CircularProgressbarWithChildren
-        value={clamp(percent, 0, 100)}
-        strokeWidth={9}
-        styles={buildStyles({
-          pathColor: color,
-          trailColor: colors.border,
-          strokeLinecap: "round",
-          pathTransitionDuration: 0.6
-        })}
-      >
-        <div style={styles.gaugeBig}>{big}</div>
-        {small && <div style={styles.gaugeSmall}>{small}</div>}
-      </CircularProgressbarWithChildren>
-    </div>
+    <Tile title={title} accent={accent}>
+      <div style={styles.gaugeWrap}>
+        <CircularProgressbar
+          value={clamp(percent, 0, 100)}
+          strokeWidth={10}
+          styles={buildStyles({
+            pathColor: color,
+            trailColor: colors.border,
+            strokeLinecap: "round",
+            pathTransitionDuration: 0.6
+          })}
+        />
+      </div>
+      <div style={styles.value}>
+        {value}<span style={styles.unit}>{unit}</span>
+      </div>
+      {caption && <div style={{ ...styles.caption, color }}>{caption}</div>}
+    </Tile>
   );
 }
 
@@ -60,74 +71,58 @@ export default function ConditionsTiles({
       {/* Outdoor temperature — the headline tile */}
       <Tile title="OUTDOOR TEMP" accent="#ff7a45">
         <div style={styles.bigTemp}>
-          {Math.round(temp)}<span style={styles.deg}>°F</span>
+          {fmt(temp)}<span style={styles.deg}>°F</span>
         </div>
         <div style={styles.subRow}>
-          <span>Feels <strong>{Math.round(feelsLike)}°</strong></span>
-          <span>Dew <strong>{Math.round(dewPoint)}°</strong></span>
+          <span>Feels <strong>{fmt(feelsLike)}°</strong></span>
+          <span>Dew <strong>{fmt(dewPoint)}°</strong></span>
         </div>
       </Tile>
 
       {/* Wind compass */}
       <Tile title="WIND" accent="#38bdf8">
-        <div style={styles.gaugeWrap}>
-          <div style={styles.compass}>
-            <span style={{ ...styles.card_dir, top: 4, left: "50%", transform: "translateX(-50%)" }}>N</span>
-            <span style={{ ...styles.card_dir, right: 6, top: "50%", transform: "translateY(-50%)" }}>E</span>
-            <span style={{ ...styles.card_dir, bottom: 4, left: "50%", transform: "translateX(-50%)" }}>S</span>
-            <span style={{ ...styles.card_dir, left: 6, top: "50%", transform: "translateY(-50%)" }}>W</span>
-            <div style={{ ...styles.needle, transform: `translate(-50%, -100%) rotate(${windDir}deg)` }} />
-            <div style={styles.compassCenter} />
-          </div>
+        <div style={styles.compass}>
+          <span style={{ ...styles.cardDir, top: 4, left: "50%", transform: "translateX(-50%)" }}>N</span>
+          <span style={{ ...styles.cardDir, right: 6, top: "50%", transform: "translateY(-50%)" }}>E</span>
+          <span style={{ ...styles.cardDir, bottom: 4, left: "50%", transform: "translateX(-50%)" }}>S</span>
+          <span style={{ ...styles.cardDir, left: 6, top: "50%", transform: "translateY(-50%)" }}>W</span>
+          <div style={{ ...styles.needle, transform: `translate(-50%, -100%) rotate(${windDir}deg)` }} />
+          <div style={styles.compassCenter} />
         </div>
-        <div style={styles.windRead}>
-          <strong>{compassDir(windDir)}</strong> · {wind.toFixed(1)} mph
+        <div style={styles.value}>
+          {fmt(wind, 1)}<span style={styles.unit}> mph</span>
         </div>
-        <div style={styles.subRow}><span>Gust {gust.toFixed(1)} mph</span></div>
+        <div style={styles.caption}>{compassDir(windDir)} ({fmt(windDir)}°) · gust {fmt(gust, 1)}</div>
       </Tile>
 
-      {/* Humidity gauge */}
-      <Tile title="HUMIDITY" accent="#60a5fa">
-        <Gauge percent={humidity} color="#60a5fa" big={`${Math.round(humidity)}%`} />
-      </Tile>
+      <GaugeTile
+        title="HUMIDITY" accent="#60a5fa"
+        percent={humidity} color="#60a5fa" value={fmt(humidity)} unit="%"
+      />
 
-      {/* UV index gauge (0–12 scale) */}
-      <Tile title="UV INDEX" accent={uvi.color}>
-        <Gauge
-          percent={(clamp(uv, 0, 12) / 12) * 100}
-          color={uvi.color}
-          big={Number.isInteger(uv) ? uv : uv.toFixed(1)}
-          small={uvi.label}
-        />
-      </Tile>
+      <GaugeTile
+        title="UV INDEX" accent={uvi.color}
+        percent={(clamp(uv, 0, 12) / 12) * 100} color={uvi.color}
+        value={fmt(uv, uv >= 10 ? 0 : 1)} unit="" caption={uvi.label}
+      />
 
-      {/* Barometric pressure gauge (typical 29.0–31.0 inHg window) */}
-      <Tile title="PRESSURE" accent="#34d399">
-        <Gauge
-          percent={((clamp(pressure, 29, 31) - 29) / 2) * 100}
-          color="#34d399"
-          big={pressure.toFixed(2)}
-          small="inHg"
-        />
-      </Tile>
+      <GaugeTile
+        title="PRESSURE" accent="#34d399"
+        percent={((clamp(pressure, 29, 31) - 29) / 2) * 100} color="#34d399"
+        value={fmt(pressure, 2)} unit=" inHg"
+      />
 
-      {/* Solar radiation gauge (0–1000 W/m²) */}
-      <Tile title="SOLAR" accent="#facc15">
-        <Gauge
-          percent={(clamp(solar, 0, 1000) / 1000) * 100}
-          color="#facc15"
-          big={Math.round(solar)}
-          small="W/m²"
-        />
-      </Tile>
+      <GaugeTile
+        title="SOLAR" accent="#facc15"
+        percent={(clamp(solar, 0, 1000) / 1000) * 100} color="#facc15"
+        value={fmt(solar)} unit=" W/m²"
+      />
 
       {/* Rain today */}
       <Tile title="RAIN TODAY" accent="#a78bfa">
-        <div style={styles.rainWrap}>
-          <div style={styles.rainDrop}>💧</div>
-          <div style={styles.bigTemp}>
-            {rain.toFixed(2)}<span style={styles.deg}> in</span>
-          </div>
+        <div style={styles.rainDrop}>💧</div>
+        <div style={styles.value}>
+          {fmt(rain, 2)}<span style={styles.unit}> in</span>
         </div>
       </Tile>
     </div>
@@ -150,55 +145,62 @@ const styles = {
     color: colors.text,
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
     minHeight: 210
   },
   tileTitle: {
-    alignSelf: "flex-start",
     fontSize: 12,
     fontWeight: "bold",
     letterSpacing: 0.8,
     marginBottom: 8
   },
+  tileBody: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  value: {
+    fontSize: 30,
+    fontWeight: "bold",
+    lineHeight: 1.1,
+    marginTop: 10
+  },
+  unit: { fontSize: 15, opacity: 0.7, fontWeight: "normal" },
+  caption: { fontSize: 12, opacity: 0.85, marginTop: 4, fontWeight: "bold" },
+
   bigTemp: {
     fontSize: 52,
     fontWeight: "bold",
-    lineHeight: 1.1,
-    marginTop: "auto"
+    lineHeight: 1.1
   },
   deg: { fontSize: 22, opacity: 0.7, fontWeight: "normal" },
   subRow: {
     display: "flex",
     gap: 14,
-    marginTop: 10,
-    marginBottom: "auto",
+    marginTop: 12,
     fontSize: 13,
     opacity: 0.8
   },
-  gaugeWrap: {
-    width: 130,
-    height: 130,
-    margin: "auto 0"
-  },
-  gaugeBig: { fontSize: 24, fontWeight: "bold" },
-  gaugeSmall: { fontSize: 12, opacity: 0.7, marginTop: 2 },
+
+  gaugeWrap: { width: 104, height: 104 },
 
   // compass
   compass: {
     position: "relative",
-    width: 130,
-    height: 130,
+    width: 104,
+    height: 104,
     borderRadius: "50%",
     border: `2px solid ${colors.border}`,
     background: `radial-gradient(circle, ${colors.surfaceAlt} 55%, ${colors.surface} 100%)`
   },
-  card_dir: { position: "absolute", fontSize: 11, opacity: 0.6, fontWeight: "bold" },
+  cardDir: { position: "absolute", fontSize: 10, opacity: 0.6, fontWeight: "bold" },
   needle: {
     position: "absolute",
     left: "50%",
     top: "50%",
     width: 4,
-    height: 52,
+    height: 42,
     background: "#38bdf8",
     transformOrigin: "bottom center",
     borderRadius: 999,
@@ -208,19 +210,11 @@ const styles = {
     position: "absolute",
     left: "50%",
     top: "50%",
-    width: 12,
-    height: 12,
+    width: 11,
+    height: 11,
     borderRadius: "50%",
     background: colors.text,
     transform: "translate(-50%, -50%)"
   },
-  windRead: { marginTop: 10, fontSize: 15 },
-
-  rainWrap: {
-    margin: "auto 0",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center"
-  },
-  rainDrop: { fontSize: 40, marginBottom: 4 }
+  rainDrop: { fontSize: 44 }
 };
