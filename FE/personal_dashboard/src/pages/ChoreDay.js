@@ -139,16 +139,16 @@ export default function ChoreDay() {
         ‹ Back to Calendar
       </button>
 
-      <h1>🧹 {dateLabel}</h1>
+      <h1>✅ {dateLabel}</h1>
 
       {error && <div style={styles.error}>{error}</div>}
 
       <div style={styles.card}>
-        <h2>Add Chore</h2>
+        <h2>Add To-Do</h2>
 
         <input
           style={styles.input}
-          placeholder="Chore title"
+          placeholder="To-do title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
@@ -194,15 +194,15 @@ export default function ChoreDay() {
         )}
 
         <button style={styles.button} onClick={addChore}>
-          Add Chore
+          Add To-Do
         </button>
       </div>
 
       <div style={styles.card}>
-        <h2>Chores for the Day</h2>
+        <h2>To-Do for the Day</h2>
 
         {chores.length === 0 ? (
-          <p>No chores due this day.</p>
+          <p>Nothing to do this day.</p>
         ) : (
           chores.map((chore) => (
             <div key={chore.occurrence_id} style={styles.choreRow}>

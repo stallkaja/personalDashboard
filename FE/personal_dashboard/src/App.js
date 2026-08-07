@@ -28,6 +28,7 @@ import Chores from "./pages/Chores";
 import ChoreDay from "./pages/ChoreDay";
 import MealPlanner from "./pages/MealPlanner";
 import MealDay from "./pages/MealDay";
+import PlanMeals from "./pages/PlanMeals";
 import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
@@ -130,6 +131,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <MealPlanner />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/meal-planner/plan"
+            element={
+              <ProtectedRoute>
+                <PlanMeals />
               </ProtectedRoute>
             }
           />

@@ -10,7 +10,7 @@ const LINKS = [
   { to: "/", label: "Dashboard", icon: "🏠" },
   { to: "/weather-center", label: "Weather Center", icon: "🌤️" },
   { to: "/calendar", label: "Calendar", icon: "📅" },
-  { to: "/chores", label: "Chores", icon: "🧹" },
+  { to: "/chores", label: "To Do List", icon: "✅" },
   { to: "/meal-planner", label: "Menu", icon: "🍽️" },
   { to: "/shopping-list", label: "Shopping List", icon: "🛒" },
   { to: "/photo-gallery", label: "Photos", icon: "🖼️" },

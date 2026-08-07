@@ -83,7 +83,7 @@ export default function Chores() {
 
   return (
     <div style={{ ...styles.page, padding: isMobile ? 10 : 20 }}>
-      <h1>🧹 Chores</h1>
+      <h1>✅ To Do List</h1>
 
       {error && <div style={styles.error}>{error}</div>}
 

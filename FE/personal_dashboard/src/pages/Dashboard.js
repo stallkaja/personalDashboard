@@ -104,7 +104,7 @@ export default function Dashboard() {
           </Link>
 
           <Link to="/chores" style={styles.secondaryButton}>
-            Chores
+            To Do List
           </Link>
 
           <Link to="/meal-planner" style={styles.secondaryButton}>
@@ -165,7 +165,7 @@ export default function Dashboard() {
         </div>
 
         <div style={styles.card}>
-          <h3>🧹 Chores Due</h3>
+          <h3>✅ To Do List</h3>
 
           {todayChores.length === 0 ? (
             <p style={styles.cardText}>No chores due today.</p>
@@ -185,7 +185,7 @@ export default function Dashboard() {
             ))
           )}
 
-          <Link to="/chores" style={styles.cardLink}>Open Chores →</Link>
+          <Link to="/chores" style={styles.cardLink}>Open To Do List →</Link>
         </div>
 
         <div style={styles.card}>

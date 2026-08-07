@@ -517,6 +517,42 @@ def ensure_feature_tables():
         )
     """)
 
+    # Meal planner: a reusable recipe library (custom + imported from TheMealDB),
+    # the ingredients for each recipe, and a pantry of what's on hand (used to
+    # decide which ingredients are "missing" when building the shopping list).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS recipes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            meal_type VARCHAR(20) DEFAULT 'dinner',
+            instructions TEXT,
+            thumb VARCHAR(500),
+            source VARCHAR(20) DEFAULT 'custom',
+            external_id VARCHAR(40),
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS recipe_ingredients (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            recipe_id INT NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            quantity VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pantry_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS video_conversions (
             source_path VARCHAR(500) PRIMARY KEY,
@@ -4702,6 +4738,348 @@ def add_meal_to_shopping_list(meal_id):
     db.close()
 
     return {"message": f"Added {len(ingredients)} item(s) to shopping list"}, 201
+
+
+# ==== Meal planner: recipe library, pantry, planning =====================
+
+STARTER_RECIPES = [
+    ("Oatmeal & Berries", "breakfast", "Cook oats with milk; top with berries and honey.",
+     [("rolled oats", "1 cup"), ("milk", "2 cups"), ("blueberries", "1/2 cup"), ("honey", "1 tbsp")]),
+    ("Scrambled Eggs & Toast", "breakfast", "Scramble eggs in butter; serve with toast.",
+     [("eggs", "3"), ("butter", "1 tbsp"), ("bread", "2 slices"), ("salt", "to taste")]),
+    ("Greek Yogurt Parfait", "breakfast", "Layer yogurt, granola, and fruit.",
+     [("greek yogurt", "1 cup"), ("granola", "1/2 cup"), ("strawberries", "1/2 cup"), ("honey", "1 tbsp")]),
+    ("Turkey Sandwich", "lunch", "Assemble sandwich with turkey and veggies.",
+     [("bread", "2 slices"), ("turkey", "3 slices"), ("lettuce", "1 leaf"), ("tomato", "2 slices"), ("mayonnaise", "1 tbsp")]),
+    ("Chicken Caesar Salad", "lunch", "Toss romaine with chicken, dressing, parmesan, croutons.",
+     [("romaine lettuce", "1 head"), ("chicken breast", "1"), ("parmesan", "1/4 cup"), ("croutons", "1/2 cup"), ("caesar dressing", "3 tbsp")]),
+    ("Grilled Cheese & Tomato Soup", "lunch", "Grill cheese sandwich; heat tomato soup.",
+     [("bread", "2 slices"), ("cheddar cheese", "2 slices"), ("butter", "1 tbsp"), ("tomato soup", "1 can")]),
+    ("Spaghetti Bolognese", "dinner", "Brown beef with onion and garlic; simmer with sauce; serve over pasta.",
+     [("spaghetti", "1 lb"), ("ground beef", "1 lb"), ("onion", "1"), ("garlic", "2 cloves"), ("tomato sauce", "1 jar")]),
+    ("Sheet-Pan Chicken & Veggies", "dinner", "Roast chicken and vegetables with oil and salt.",
+     [("chicken breast", "2"), ("broccoli", "1 head"), ("potatoes", "3"), ("olive oil", "2 tbsp"), ("salt", "to taste")]),
+    ("Beef Tacos", "dinner", "Cook beef with seasoning; serve in tortillas with toppings.",
+     [("ground beef", "1 lb"), ("taco seasoning", "1 packet"), ("tortillas", "8"), ("cheddar cheese", "1 cup"), ("lettuce", "1 cup")]),
+    ("Baked Salmon & Rice", "dinner", "Bake salmon with lemon and oil; serve with rice and asparagus.",
+     [("salmon", "2 fillets"), ("rice", "1 cup"), ("lemon", "1"), ("olive oil", "1 tbsp"), ("asparagus", "1 bunch")]),
+]
+
+MEALDB_BASE = "https://www.themealdb.com/api/json/v1/1"
+
+
+def _recipe_with_ingredients(cursor, recipe_id):
+    cursor.execute("""
+        SELECT id, name, meal_type, instructions, thumb, source, external_id
+        FROM recipes WHERE id=%s
+    """, (recipe_id,))
+    r = cursor.fetchone()
+    if not r:
+        return None
+    cursor.execute(
+        "SELECT id, name, quantity FROM recipe_ingredients WHERE recipe_id=%s ORDER BY id ASC",
+        (recipe_id,)
+    )
+    ings = [{"id": i[0], "name": i[1], "quantity": i[2]} for i in cursor.fetchall()]
+    return {
+        "id": r[0], "name": r[1], "meal_type": r[2], "instructions": r[3],
+        "thumb": r[4], "source": r[5], "external_id": r[6], "ingredients": ings
+    }
+
+
+def _parse_mealdb(meal):
+    ings = []
+    for i in range(1, 21):
+        name = (meal.get(f"strIngredient{i}") or "").strip()
+        measure = (meal.get(f"strMeasure{i}") or "").strip()
+        if name:
+            ings.append({"name": name, "quantity": measure or None})
+    return {
+        "external_id": meal.get("idMeal"),
+        "name": meal.get("strMeal"),
+        "thumb": meal.get("strMealThumb"),
+        "category": meal.get("strCategory"),
+        "area": meal.get("strArea"),
+        "instructions": meal.get("strInstructions"),
+        "ingredients": ings,
+    }
+
+
+@app.route("/recipes", methods=["GET"])
+@jwt_required()
+def list_recipes():
+    meal_type = request.args.get("meal_type")
+    db = get_db(); cursor = db.cursor()
+    if meal_type:
+        cursor.execute("SELECT id FROM recipes WHERE meal_type=%s ORDER BY name ASC", (meal_type,))
+    else:
+        cursor.execute("SELECT id FROM recipes ORDER BY meal_type ASC, name ASC")
+    ids = [r[0] for r in cursor.fetchall()]
+    recipes = [_recipe_with_ingredients(cursor, rid) for rid in ids]
+    cursor.close(); db.close()
+    return {"recipes": recipes}
+
+
+@app.route("/recipes/<int:recipe_id>", methods=["GET"])
+@jwt_required()
+def get_recipe(recipe_id):
+    db = get_db(); cursor = db.cursor()
+    recipe = _recipe_with_ingredients(cursor, recipe_id)
+    cursor.close(); db.close()
+    if not recipe:
+        return {"error": "Recipe not found"}, 404
+    return {"recipe": recipe}
+
+
+@app.route("/recipes", methods=["POST"])
+@jwt_required()
+def create_recipe():
+    user_id = int(get_jwt()["sub"])
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return {"error": "Recipe name is required"}, 400
+
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("""
+        INSERT INTO recipes (name, meal_type, instructions, thumb, source, external_id, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """, (name, data.get("meal_type") or "dinner", data.get("instructions"),
+          data.get("thumb"), data.get("source") or "custom", data.get("external_id"), user_id))
+    recipe_id = cursor.lastrowid
+    for ing in (data.get("ingredients") or []):
+        iname = (ing.get("name") or "").strip()
+        if iname:
+            cursor.execute(
+                "INSERT INTO recipe_ingredients (recipe_id, name, quantity) VALUES (%s,%s,%s)",
+                (recipe_id, iname, ing.get("quantity"))
+            )
+    db.commit(); cursor.close(); db.close()
+    return {"id": recipe_id}, 201
+
+
+@app.route("/recipes/<int:recipe_id>", methods=["PUT"])
+@jwt_required()
+def update_recipe(recipe_id):
+    data = request.json or {}
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("SELECT id FROM recipes WHERE id=%s", (recipe_id,))
+    if not cursor.fetchone():
+        cursor.close(); db.close()
+        return {"error": "Recipe not found"}, 404
+    cursor.execute(
+        "UPDATE recipes SET name=%s, meal_type=%s, instructions=%s WHERE id=%s",
+        (data.get("name"), data.get("meal_type"), data.get("instructions"), recipe_id)
+    )
+    if "ingredients" in data:
+        cursor.execute("DELETE FROM recipe_ingredients WHERE recipe_id=%s", (recipe_id,))
+        for ing in (data.get("ingredients") or []):
+            iname = (ing.get("name") or "").strip()
+            if iname:
+                cursor.execute(
+                    "INSERT INTO recipe_ingredients (recipe_id, name, quantity) VALUES (%s,%s,%s)",
+                    (recipe_id, iname, ing.get("quantity"))
+                )
+    db.commit(); cursor.close(); db.close()
+    return {"message": "Recipe updated"}
+
+
+@app.route("/recipes/<int:recipe_id>", methods=["DELETE"])
+@jwt_required()
+def delete_recipe(recipe_id):
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("DELETE FROM recipe_ingredients WHERE recipe_id=%s", (recipe_id,))
+    cursor.execute("DELETE FROM recipes WHERE id=%s", (recipe_id,))
+    db.commit(); cursor.close(); db.close()
+    return {"message": "Recipe deleted"}
+
+
+@app.route("/recipes/seed", methods=["POST"])
+@jwt_required()
+def seed_recipes():
+    user_id = int(get_jwt()["sub"])
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("SELECT COUNT(*) FROM recipes")
+    if cursor.fetchone()[0] > 0:
+        cursor.close(); db.close()
+        return {"message": "Recipes already exist", "seeded": 0}
+    count = 0
+    for name, meal_type, instructions, ings in STARTER_RECIPES:
+        cursor.execute("""
+            INSERT INTO recipes (name, meal_type, instructions, source, created_by)
+            VALUES (%s, %s, %s, 'starter', %s)
+        """, (name, meal_type, instructions, user_id))
+        rid = cursor.lastrowid
+        for iname, qty in ings:
+            cursor.execute(
+                "INSERT INTO recipe_ingredients (recipe_id, name, quantity) VALUES (%s,%s,%s)",
+                (rid, iname, qty)
+            )
+        count += 1
+    db.commit(); cursor.close(); db.close()
+    return {"message": f"Seeded {count} starter recipes", "seeded": count}, 201
+
+
+@app.route("/recipes/discover", methods=["GET"])
+@jwt_required()
+def discover_recipes():
+    q = (request.args.get("q") or "").strip()
+    try:
+        resp = requests.get(f"{MEALDB_BASE}/search.php", params={"s": q}, timeout=15)
+        meals = (resp.json() or {}).get("meals") or []
+    except Exception as e:
+        return {"error": f"Recipe search failed: {e}"}, 502
+    results = [{
+        "external_id": m.get("idMeal"),
+        "name": m.get("strMeal"),
+        "thumb": m.get("strMealThumb"),
+        "category": m.get("strCategory"),
+        "area": m.get("strArea"),
+    } for m in meals]
+    return {"results": results}
+
+
+@app.route("/recipes/import", methods=["POST"])
+@jwt_required()
+def import_recipe():
+    user_id = int(get_jwt()["sub"])
+    data = request.json or {}
+    external_id = data.get("external_id")
+    if not external_id:
+        return {"error": "external_id is required"}, 400
+    meal_type = data.get("meal_type") or "dinner"
+
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("SELECT id FROM recipes WHERE external_id=%s", (str(external_id),))
+    existing = cursor.fetchone()
+    if existing:
+        cursor.close(); db.close()
+        return {"id": existing[0], "message": "Already in your library"}, 200
+
+    try:
+        resp = requests.get(f"{MEALDB_BASE}/lookup.php", params={"i": external_id}, timeout=15)
+        meals = (resp.json() or {}).get("meals") or []
+    except Exception as e:
+        cursor.close(); db.close()
+        return {"error": f"Recipe lookup failed: {e}"}, 502
+    if not meals:
+        cursor.close(); db.close()
+        return {"error": "Recipe not found"}, 404
+
+    parsed = _parse_mealdb(meals[0])
+    cursor.execute("""
+        INSERT INTO recipes (name, meal_type, instructions, thumb, source, external_id, created_by)
+        VALUES (%s, %s, %s, %s, 'themealdb', %s, %s)
+    """, (parsed["name"], meal_type, parsed["instructions"], parsed["thumb"],
+          str(external_id), user_id))
+    rid = cursor.lastrowid
+    for ing in parsed["ingredients"]:
+        cursor.execute(
+            "INSERT INTO recipe_ingredients (recipe_id, name, quantity) VALUES (%s,%s,%s)",
+            (rid, ing["name"], ing["quantity"])
+        )
+    db.commit(); cursor.close(); db.close()
+    return {"id": rid, "message": "Recipe imported"}, 201
+
+
+@app.route("/pantry", methods=["GET"])
+@jwt_required()
+def list_pantry():
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("SELECT id, name FROM pantry_items ORDER BY name ASC")
+    items = [{"id": r[0], "name": r[1]} for r in cursor.fetchall()]
+    cursor.close(); db.close()
+    return {"pantry": items}
+
+
+@app.route("/pantry", methods=["POST"])
+@jwt_required()
+def add_pantry_item():
+    user_id = int(get_jwt()["sub"])
+    name = ((request.json or {}).get("name") or "").strip()
+    if not name:
+        return {"error": "name is required"}, 400
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("INSERT INTO pantry_items (name, created_by) VALUES (%s,%s)", (name, user_id))
+    new_id = cursor.lastrowid
+    db.commit(); cursor.close(); db.close()
+    return {"id": new_id}, 201
+
+
+@app.route("/pantry/<int:item_id>", methods=["DELETE"])
+@jwt_required()
+def delete_pantry_item(item_id):
+    db = get_db(); cursor = db.cursor()
+    cursor.execute("DELETE FROM pantry_items WHERE id=%s", (item_id,))
+    db.commit(); cursor.close(); db.close()
+    return {"message": "Removed"}
+
+
+@app.route("/recipes/<int:recipe_id>/plan", methods=["POST"])
+@jwt_required()
+def plan_recipe(recipe_id):
+    user_id = int(get_jwt()["sub"])
+    data = request.json or {}
+    meal_date = data.get("meal_date")
+    if not meal_date:
+        return {"error": "meal_date is required"}, 400
+
+    db = get_db(); cursor = db.cursor()
+    recipe = _recipe_with_ingredients(cursor, recipe_id)
+    if not recipe:
+        cursor.close(); db.close()
+        return {"error": "Recipe not found"}, 404
+    meal_type = (data.get("meal_type") or recipe["meal_type"] or "dinner").capitalize()
+
+    cursor.execute("""
+        INSERT INTO meals (meal_date, meal_type, title, notes, created_by)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (meal_date, meal_type, recipe["name"], recipe.get("instructions"), user_id))
+    meal_id = cursor.lastrowid
+    for ing in recipe["ingredients"]:
+        cursor.execute(
+            "INSERT INTO meal_ingredients (meal_id, name, quantity) VALUES (%s,%s,%s)",
+            (meal_id, ing["name"], ing["quantity"])
+        )
+    db.commit(); cursor.close(); db.close()
+    return {"meal_id": meal_id, "message": f"Planned {recipe['name']} for {meal_date}"}, 201
+
+
+@app.route("/recipes/<int:recipe_id>/add-missing-to-shopping-list", methods=["POST"])
+@jwt_required()
+def add_recipe_missing_to_shopping(recipe_id):
+    user_id = int(get_jwt()["sub"])
+    db = get_db(); cursor = db.cursor()
+    recipe = _recipe_with_ingredients(cursor, recipe_id)
+    if not recipe:
+        cursor.close(); db.close()
+        return {"error": "Recipe not found"}, 404
+
+    cursor.execute("SELECT LOWER(name) FROM pantry_items")
+    pantry = [r[0] for r in cursor.fetchall() if r[0]]
+    cursor.execute("SELECT LOWER(name) FROM shopping_items WHERE is_checked=FALSE")
+    on_list = [r[0] for r in cursor.fetchall() if r[0]]
+
+    def have_it(iname):
+        low = iname.lower()
+        return any(p in low or low in p for p in pantry)
+
+    added, skipped = 0, 0
+    for ing in recipe["ingredients"]:
+        if have_it(ing["name"]) or ing["name"].lower() in on_list:
+            skipped += 1
+            continue
+        cursor.execute(
+            "INSERT INTO shopping_items (name, quantity, created_by) VALUES (%s,%s,%s)",
+            (ing["name"], ing["quantity"], user_id)
+        )
+        added += 1
+    db.commit(); cursor.close(); db.close()
+    return {
+        "added": added,
+        "skipped": skipped,
+        "message": f"Added {added} item(s); skipped {skipped} you already have"
+    }, 201
 
 
 @app.route("/stats/records", methods=["GET"])

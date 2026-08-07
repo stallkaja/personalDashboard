@@ -81,7 +81,12 @@ export default function MealPlanner() {
 
   return (
     <div style={{ ...styles.page, padding: isMobile ? 10 : 20 }}>
-      <h1>🍽️ Menu</h1>
+      <div style={styles.header}>
+        <h1 style={{ margin: 0 }}>🍽️ Menu</h1>
+        <button style={styles.planButton} onClick={() => navigate("/meal-planner/plan")}>
+          🍳 Plan Meals
+        </button>
+      </div>
 
       {error && <div style={styles.error}>{error}</div>}
 
@@ -152,6 +157,24 @@ const styles = {
   page: theme.page,
   card: theme.card,
   error: theme.error,
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    marginBottom: 12
+  },
+  planButton: {
+    padding: "10px 16px",
+    borderRadius: 10,
+    border: "none",
+    cursor: "pointer",
+    background: colors.primary,
+    color: colors.primaryText,
+    fontWeight: "bold",
+    fontSize: 15
+  },
   monthHeader: {
     display: "flex",
     alignItems: "center",
