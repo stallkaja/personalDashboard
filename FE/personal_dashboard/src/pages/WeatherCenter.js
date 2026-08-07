@@ -4,8 +4,7 @@ import { io } from "socket.io-client";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
 
-import WindCompass from "../components/WindCompass";
-import CurrentConditions from "../components/CurrentConditions";
+import ConditionsTiles from "../components/ConditionsTiles";
 import WeatherRadar from "../components/WeatherRadar";
 
 import {
@@ -302,26 +301,19 @@ export default function WeatherCenter() {
         </div>
       )}
 
-      <div style={{ ...styles.heroGrid, gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr" }}>
-        <CurrentConditions
-          temp={temp}
-          feelsLike={feelsLike}
-          dewPoint={dewPoint}
-          humidity={humidity}
-          wind={wind}
-          gust={gust}
-          pressure={pressure}
-          uv={uv}
-          rain={rain}
-          solar={solar}
-        />
-
-        <WindCompass
-          direction={windDir}
-          speed={wind}
-          gust={gust}
-        />
-      </div>
+      <ConditionsTiles
+        temp={temp}
+        feelsLike={feelsLike}
+        dewPoint={dewPoint}
+        humidity={humidity}
+        wind={wind}
+        gust={gust}
+        windDir={windDir}
+        pressure={pressure}
+        uv={uv}
+        rain={rain}
+        solar={solar}
+      />
 
       {forecast && forecast.length > 0 && (
         <div style={styles.chartBox}>
