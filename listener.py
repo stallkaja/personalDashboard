@@ -553,6 +553,20 @@ def ensure_feature_tables():
         )
     """)
 
+    # AI daily news summaries — one saved report per day, searchable.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS news_reports (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            report_date DATE NOT NULL UNIQUE,
+            title VARCHAR(255),
+            content TEXT NOT NULL,
+            model VARCHAR(50),
+            article_count INT,
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS video_conversions (
             source_path VARCHAR(500) PRIMARY KEY,
@@ -4924,6 +4938,194 @@ def get_news():
         "categories": [name for name, _ in NEWS_CATEGORIES] + ["General"],
         "articles": items[:limit]
     }
+
+
+# ==== AI daily news summary =============================================
+# Uses the Claude API (Messages endpoint over raw HTTP so the backend has no
+# new import to fail on at startup) to write a daily briefing from the day's
+# aggregated headlines. Inert until ANTHROPIC_API_KEY is set in secrets.json.
+ANTHROPIC_API_KEY = _secret("ANTHROPIC_API_KEY", "")
+NEWS_REPORT_MODEL = "claude-opus-5"
+
+NEWS_REPORT_SYSTEM = (
+    "You are a news editor writing a concise daily briefing for a family "
+    "dashboard. You are given the day's headlines aggregated from several major "
+    "outlets. Write a clear, neutral, factual summary of what happened today.\n\n"
+    "Start with a one- or two-sentence overview of the day. Then organize the "
+    "rest under short topic headings (for example: World, Politics, Business, "
+    "Technology, Science & Health, Sports, Other) — include a heading only if "
+    "there is relevant news for it, and put a few brief bullet points under each. "
+    "Aim for roughly 300-500 words. Only report things supported by the supplied "
+    "headlines; do not invent events, numbers, or quotes. Write plainly for a "
+    "general audience."
+)
+
+
+def _news_today_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _generate_news_report(articles, date):
+    """Call Claude to summarize the day's headlines. Returns (title, content, model)."""
+    lines = []
+    for a in articles[:120]:
+        title = (a.get("title") or "").strip()
+        if not title:
+            continue
+        source = a.get("source") or ""
+        summary = (a.get("summary") or "").strip()
+        line = f"- [{source}] {title}"
+        if summary:
+            line += f" — {summary[:160]}"
+        lines.append(line)
+    headlines = "\n".join(lines)
+
+    user = (
+        f"Today is {date}. Here are today's headlines from major outlets:\n\n"
+        f"{headlines}\n\nWrite the daily briefing."
+    )
+
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "server-side-fallback-2026-07-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": NEWS_REPORT_MODEL,
+            "max_tokens": 4000,
+            "output_config": {"effort": "medium"},
+            "fallbacks": "default",
+            "system": NEWS_REPORT_SYSTEM,
+            "messages": [{"role": "user", "content": user}],
+        },
+        timeout=120,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Claude API {resp.status_code}: {resp.text[:200]}")
+
+    data = resp.json()
+    if data.get("stop_reason") == "refusal":
+        raise RuntimeError("The model declined to summarize today's news.")
+
+    text = "".join(
+        b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
+    ).strip()
+    if not text:
+        raise RuntimeError("The model returned an empty summary.")
+
+    return f"Daily Briefing — {date}", text, data.get("model", NEWS_REPORT_MODEL)
+
+
+@app.route("/news/report/generate", methods=["POST"])
+@jwt_required()
+def generate_news_report():
+    user_id = int(get_jwt()["sub"])
+    if not ANTHROPIC_API_KEY:
+        return {"error": "AI summaries aren't configured. Add ANTHROPIC_API_KEY to secrets.json."}, 503
+
+    data = request.json or {}
+    date = data.get("date") or _news_today_str()
+    force = bool(data.get("force"))
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT title, content FROM news_reports WHERE report_date=%s", (date,))
+    existing = cursor.fetchone()
+    if existing and not force:
+        cursor.close(); db.close()
+        return {"date": date, "title": existing[0], "content": existing[1], "cached": True}
+    cursor.close(); db.close()
+
+    articles = _news_cache["data"]
+    if not articles:
+        articles = _news_fetch_all()
+        if articles:
+            _news_cache["data"] = articles
+            _news_cache["fetched_at"] = datetime.now().timestamp()
+    if not articles:
+        return {"error": "No news articles are available to summarize right now."}, 503
+
+    try:
+        title, content, model_used = _generate_news_report(articles, date)
+    except Exception as e:
+        return {"error": f"Could not generate the summary: {e}"}, 502
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        INSERT INTO news_reports (report_date, title, content, model, article_count, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            title=VALUES(title), content=VALUES(content), model=VALUES(model),
+            article_count=VALUES(article_count), created_at=CURRENT_TIMESTAMP
+    """, (date, title, content, model_used, len(articles), user_id))
+    db.commit()
+    cursor.close(); db.close()
+
+    return {"date": date, "title": title, "content": content, "cached": False}, 201
+
+
+@app.route("/news/reports", methods=["GET"])
+@jwt_required()
+def list_news_reports():
+    q = (request.args.get("q") or "").strip()
+    try:
+        limit = min(max(int(request.args.get("limit", 30)), 1), 100)
+    except (TypeError, ValueError):
+        limit = 30
+
+    db = get_db()
+    cursor = db.cursor()
+    if q:
+        like = f"%{q}%"
+        cursor.execute("""
+            SELECT report_date, title, content, article_count, created_at
+            FROM news_reports
+            WHERE content LIKE %s OR title LIKE %s OR CAST(report_date AS CHAR) LIKE %s
+            ORDER BY report_date DESC LIMIT %s
+        """, (like, like, like, limit))
+    else:
+        cursor.execute("""
+            SELECT report_date, title, content, article_count, created_at
+            FROM news_reports ORDER BY report_date DESC LIMIT %s
+        """, (limit,))
+    rows = cursor.fetchall()
+    cursor.close(); db.close()
+
+    reports = [{
+        "date": r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0]),
+        "title": r[1],
+        "snippet": (r[2][:220] + "…") if r[2] and len(r[2]) > 220 else (r[2] or ""),
+        "article_count": r[3],
+        "created_at": r[4].isoformat() if r[4] else None,
+    } for r in rows]
+
+    return {"reports": reports, "configured": bool(ANTHROPIC_API_KEY)}
+
+
+@app.route("/news/reports/<date>", methods=["GET"])
+@jwt_required()
+def get_news_report(date):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT report_date, title, content, article_count, created_at
+        FROM news_reports WHERE report_date=%s
+    """, (date,))
+    r = cursor.fetchone()
+    cursor.close(); db.close()
+    if not r:
+        return {"error": "No report for that date"}, 404
+    return {"report": {
+        "date": r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0]),
+        "title": r[1],
+        "content": r[2],
+        "article_count": r[3],
+        "created_at": r[4].isoformat() if r[4] else None,
+    }}
 
 
 # ==== Meal planner: recipe library, pantry, planning =====================
