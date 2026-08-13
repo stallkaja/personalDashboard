@@ -201,7 +201,7 @@ function DailySummary({ token, isMobile }) {
       });
       const d = await res.json();
       if (!res.ok) { setError(d.error || "Could not generate the summary."); return; }
-      setActive({ date: d.date, title: d.title, content: d.content });
+      setActive({ date: d.date, title: d.title, content: d.content, model: d.model });
       load(q);
     } catch {
       setError("Network error generating the summary.");
@@ -226,7 +226,10 @@ function DailySummary({ token, isMobile }) {
       <div>
         <button style={styles.backBtn} onClick={() => setActive(null)}>‹ Back to summaries</button>
         <div style={styles.reportCard}>
-          <div style={styles.reportDate}>{active.date}</div>
+          <div style={styles.reportDate}>
+            {active.date}
+            {active.model ? " · AI briefing" : ""}
+          </div>
           <h2 style={{ margin: "4px 0 12px" }}>{active.title}</h2>
           <div style={styles.reportContent}>{active.content}</div>
         </div>
@@ -236,16 +239,11 @@ function DailySummary({ token, isMobile }) {
 
   return (
     <div>
-      <p style={styles.muted}>An AI-written briefing of the day's news, saved each day and searchable.</p>
+      <p style={styles.muted}>A daily briefing of the news, written by a local AI on the server and saved each day.</p>
 
       {error && <div style={theme.error}>{error}</div>}
 
-      {!configured ? (
-        <div style={styles.notice}>
-          AI summaries aren't turned on yet. Add an <code>ANTHROPIC_API_KEY</code> to the server's
-          <code> secrets.json</code> and restart the backend to enable them.
-        </div>
-      ) : (
+      {configured ? (
         <div style={styles.genRow}>
           <button style={styles.genBtn} onClick={() => generate(false)} disabled={generating}>
             {generating ? "Writing today's briefing…" : "✍️ Generate today's summary"}
@@ -253,6 +251,12 @@ function DailySummary({ token, isMobile }) {
           <button style={styles.genGhost} onClick={() => generate(true)} disabled={generating} title="Rewrite today's report">
             ↻ Regenerate
           </button>
+        </div>
+      ) : (
+        <div style={styles.notice}>
+          The local AI isn't running yet. Install <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" style={{ color: colors.primary }}>Ollama</a> on
+          the server, pull a model (e.g. <code>ollama pull llama3.2</code>), and keep <code>ollama serve</code> running.
+          Then the daily summary can be generated here — free and private, no API key.
         </div>
       )}
 
@@ -278,6 +282,7 @@ function DailySummary({ token, isMobile }) {
               <div style={styles.body}>
                 <div style={styles.meta}>
                   <span style={styles.source}>{r.date}</span>
+                  {r.model ? <span style={styles.time}>· AI</span> : null}
                   {r.article_count ? <span style={styles.time}>· {r.article_count} headlines</span> : null}
                 </div>
                 <div style={styles.title}>{r.title}</div>

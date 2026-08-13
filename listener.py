@@ -4941,11 +4941,30 @@ def get_news():
 
 
 # ==== AI daily news summary =============================================
-# Uses the Claude API (Messages endpoint over raw HTTP so the backend has no
-# new import to fail on at startup) to write a daily briefing from the day's
-# aggregated headlines. Inert until ANTHROPIC_API_KEY is set in secrets.json.
-ANTHROPIC_API_KEY = _secret("ANTHROPIC_API_KEY", "")
-NEWS_REPORT_MODEL = "claude-opus-5"
+# Writes a daily briefing from the day's aggregated headlines using a local
+# Ollama model (free, private, no API key). Inert until Ollama is running on
+# the host with a model pulled.
+
+# Local AI via Ollama (https://ollama.com) — free and private, no API key. Runs
+# a model on the host; inert until Ollama is running and a model is pulled.
+OLLAMA_URL = _secret("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = _secret("OLLAMA_MODEL", "llama3.2")
+_ollama_probe = {"ok": False, "checked_at": 0.0}
+
+
+def _ollama_available():
+    """Cheap cached check (60s) for whether a local Ollama server is reachable."""
+    now = datetime.now().timestamp()
+    if now - _ollama_probe["checked_at"] < 60:
+        return _ollama_probe["ok"]
+    ok = False
+    try:
+        ok = requests.get(f"{OLLAMA_URL}/api/tags", timeout=1.5).status_code == 200
+    except Exception:
+        ok = False
+    _ollama_probe["ok"] = ok
+    _ollama_probe["checked_at"] = now
+    return ok
 
 NEWS_REPORT_SYSTEM = (
     "You are a news editor writing a concise daily briefing for a family "
@@ -4965,8 +4984,8 @@ def _news_today_str():
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _generate_news_report(articles, date):
-    """Call Claude to summarize the day's headlines. Returns (title, content, model)."""
+def _news_headlines_block(articles):
+    """Format the day's headlines as a bullet list for an LLM prompt."""
     lines = []
     for a in articles[:120]:
         title = (a.get("title") or "").strip()
@@ -4978,65 +4997,70 @@ def _generate_news_report(articles, date):
         if summary:
             line += f" — {summary[:160]}"
         lines.append(line)
-    headlines = "\n".join(lines)
+    return "\n".join(lines)
 
+
+def _generate_news_report_ollama(articles, date):
+    """Summarize the day's headlines with a local Ollama model — free, private.
+
+    Returns (title, content, model)."""
+    headlines = _news_headlines_block(articles)
     user = (
         f"Today is {date}. Here are today's headlines from major outlets:\n\n"
         f"{headlines}\n\nWrite the daily briefing."
     )
-
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "anthropic-beta": "server-side-fallback-2026-07-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": NEWS_REPORT_MODEL,
-            "max_tokens": 4000,
-            "output_config": {"effort": "medium"},
-            "fallbacks": "default",
-            "system": NEWS_REPORT_SYSTEM,
-            "messages": [{"role": "user", "content": user}],
-        },
-        timeout=120,
-    )
+    try:
+        resp = requests.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": NEWS_REPORT_SYSTEM},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+                "options": {"temperature": 0.4},
+            },
+            timeout=300,
+        )
+    except requests.exceptions.RequestException:
+        raise RuntimeError(
+            f"Couldn't reach the local AI (Ollama) at {OLLAMA_URL}. "
+            f"Make sure it's running ('ollama serve')."
+        )
     if resp.status_code != 200:
-        raise RuntimeError(f"Claude API {resp.status_code}: {resp.text[:200]}")
+        # Most common: the model isn't pulled yet ("try pulling it first").
+        raise RuntimeError(f"Ollama error {resp.status_code}: {resp.text[:200]}")
 
     data = resp.json()
-    if data.get("stop_reason") == "refusal":
-        raise RuntimeError("The model declined to summarize today's news.")
-
-    text = "".join(
-        b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
-    ).strip()
+    text = (data.get("message") or {}).get("content", "").strip()
     if not text:
-        raise RuntimeError("The model returned an empty summary.")
+        raise RuntimeError("The local model returned an empty summary.")
 
-    return f"Daily Briefing — {date}", text, data.get("model", NEWS_REPORT_MODEL)
+    return f"Daily Briefing — {date}", text, f"ollama:{data.get('model', OLLAMA_MODEL)}"
 
 
 @app.route("/news/report/generate", methods=["POST"])
 @jwt_required()
 def generate_news_report():
     user_id = int(get_jwt()["sub"])
-    if not ANTHROPIC_API_KEY:
-        return {"error": "AI summaries aren't configured. Add ANTHROPIC_API_KEY to secrets.json."}, 503
 
     data = request.json or {}
     date = data.get("date") or _news_today_str()
     force = bool(data.get("force"))
 
+    if not _ollama_available():
+        return {"error": "The local AI (Ollama) isn't reachable. Start it with "
+                         "'ollama serve' and pull a model (e.g. 'ollama pull llama3.2')."}, 503
+
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT title, content FROM news_reports WHERE report_date=%s", (date,))
+    cursor.execute("SELECT title, content, model FROM news_reports WHERE report_date=%s", (date,))
     existing = cursor.fetchone()
     if existing and not force:
         cursor.close(); db.close()
-        return {"date": date, "title": existing[0], "content": existing[1], "cached": True}
+        return {"date": date, "title": existing[0], "content": existing[1],
+                "model": existing[2], "cached": True}
     cursor.close(); db.close()
 
     articles = _news_cache["data"]
@@ -5049,7 +5073,7 @@ def generate_news_report():
         return {"error": "No news articles are available to summarize right now."}, 503
 
     try:
-        title, content, model_used = _generate_news_report(articles, date)
+        title, content, model_used = _generate_news_report_ollama(articles, date)
     except Exception as e:
         return {"error": f"Could not generate the summary: {e}"}, 502
 
@@ -5065,7 +5089,8 @@ def generate_news_report():
     db.commit()
     cursor.close(); db.close()
 
-    return {"date": date, "title": title, "content": content, "cached": False}, 201
+    return {"date": date, "title": title, "content": content,
+            "model": model_used, "cached": False}, 201
 
 
 @app.route("/news/reports", methods=["GET"])
@@ -5082,14 +5107,14 @@ def list_news_reports():
     if q:
         like = f"%{q}%"
         cursor.execute("""
-            SELECT report_date, title, content, article_count, created_at
+            SELECT report_date, title, content, article_count, created_at, model
             FROM news_reports
             WHERE content LIKE %s OR title LIKE %s OR CAST(report_date AS CHAR) LIKE %s
             ORDER BY report_date DESC LIMIT %s
         """, (like, like, like, limit))
     else:
         cursor.execute("""
-            SELECT report_date, title, content, article_count, created_at
+            SELECT report_date, title, content, article_count, created_at, model
             FROM news_reports ORDER BY report_date DESC LIMIT %s
         """, (limit,))
     rows = cursor.fetchall()
@@ -5101,9 +5126,10 @@ def list_news_reports():
         "snippet": (r[2][:220] + "…") if r[2] and len(r[2]) > 220 else (r[2] or ""),
         "article_count": r[3],
         "created_at": r[4].isoformat() if r[4] else None,
+        "model": r[5],
     } for r in rows]
 
-    return {"reports": reports, "configured": bool(ANTHROPIC_API_KEY)}
+    return {"reports": reports, "configured": _ollama_available()}
 
 
 @app.route("/news/reports/<date>", methods=["GET"])
@@ -5112,7 +5138,7 @@ def get_news_report(date):
     db = get_db()
     cursor = db.cursor()
     cursor.execute("""
-        SELECT report_date, title, content, article_count, created_at
+        SELECT report_date, title, content, article_count, created_at, model
         FROM news_reports WHERE report_date=%s
     """, (date,))
     r = cursor.fetchone()
@@ -5125,6 +5151,7 @@ def get_news_report(date):
         "content": r[2],
         "article_count": r[3],
         "created_at": r[4].isoformat() if r[4] else None,
+        "model": r[5],
     }}
 
 
