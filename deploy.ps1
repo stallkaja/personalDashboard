@@ -4,18 +4,27 @@
   Actions self-hosted runner on every push to main (see .github/workflows/deploy.yml),
   and safe to run by hand.
 
-  Mirrors origin/main into the live repo, then rebuilds / restarts ONLY what changed:
+  Mirrors the TARGET BRANCH into the live repo, then rebuilds / restarts ONLY
+  what changed:
     - requirements.txt changed -> pip install
     - frontend package.json changed -> npm install (root + FE)
     - any frontend source changed -> npm run build
     - any backend .py changed    -> restart Dashboard-Backend service
 
-  Gitignored files (secrets.json, build/, node_modules/, uploads/, logs/) are
-  preserved by the hard reset.
+  The target branch is resolved in this order:
+    1. -Branch parameter, if given
+    2. the branch name in deploy-target.local (host-only, gitignored)
+    3. "main"
+  Use switch-branch.ps1 to change the pinned branch on demand. The pin survives
+  hard resets because deploy-target.local is gitignored.
+
+  Gitignored files (secrets.json, build/, node_modules/, uploads/, logs/,
+  deploy-target.local) are preserved by the hard reset.
 #>
 [CmdletBinding()]
 param(
-    [string]$Repo = "C:\Users\james\Documents\projects\personalDashboard"
+    [string]$Repo = "C:\Users\james\Documents\projects\personalDashboard",
+    [string]$Branch = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -39,6 +48,14 @@ function Say($m) {
 
 Say "===== deploy start ====="
 
+# Resolve which branch to serve: -Branch, else the host-local pin file, else main.
+$TargetFile = Join-Path $Repo "deploy-target.local"
+if (-not $Branch -and (Test-Path $TargetFile)) {
+    $Branch = (Get-Content $TargetFile -Raw -ErrorAction SilentlyContinue).Trim()
+}
+if (-not $Branch) { $Branch = "main" }
+Say "target branch = $Branch"
+
 # Git may run under a different account (the runner service) than the dir owner.
 & $GIT config --global --add safe.directory $Repo 2>$null
 
@@ -53,8 +70,8 @@ if ($token) {
 }
 
 $old = (& $GIT -C $Repo rev-parse HEAD 2>$null)
-& $GIT @fetchArgs fetch origin main --quiet 2>&1 | ForEach-Object { Say "git: $_" }
-& $GIT -C $Repo reset --hard origin/main 2>&1 | ForEach-Object { Say "git: $_" }
+& $GIT @fetchArgs fetch origin $Branch --quiet 2>&1 | ForEach-Object { Say "git: $_" }
+& $GIT -C $Repo reset --hard "origin/$Branch" 2>&1 | ForEach-Object { Say "git: $_" }
 $new = (& $GIT -C $Repo rev-parse HEAD 2>$null)
 Say "old=$old new=$new"
 
