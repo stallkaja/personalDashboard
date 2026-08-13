@@ -4740,6 +4740,192 @@ def add_meal_to_shopping_list(meal_id):
     return {"message": f"Added {len(ingredients)} item(s) to shopping list"}, 201
 
 
+# ==== News aggregator ====================================================
+# Aggregates headlines from major outlets via their public RSS feeds (the
+# supported way to syndicate news). We keep only the title, a short summary,
+# a thumbnail, and a link back to the original article — never full text.
+
+NEWS_FEEDS = [
+    ("BBC", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+    ("CNN", "http://rss.cnn.com/rss/edition.xml"),
+    ("New York Times", "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"),
+    ("NPR", "https://feeds.npr.org/1001/rss.xml"),
+    ("The Guardian", "https://www.theguardian.com/world/rss"),
+    ("Fox News", "https://moxie.foxnews.com/google-publisher/latest.xml"),
+    ("Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml"),
+    ("ABC News", "https://abcnews.go.com/abcnews/topstories"),
+    ("Sky News", "https://feeds.skynews.com/feeds/rss/home.xml"),
+]
+
+_news_cache = {"data": None, "fetched_at": 0}
+NEWS_CACHE_SECONDS = 600  # 10 minutes
+
+# Lightweight keyword classification so mixed outlets can be browsed by topic.
+# First match wins, so the list is ordered most-specific first.
+NEWS_CATEGORIES = [
+    ("Business", ["business", "econom", "market", "stock", "trade", "inflation",
+                  "finance", "tariff", "earnings", "nasdaq", "dow jones", "layoff", "startup"]),
+    ("Technology", ["tech", "artificial intelligence", " ai ", "software", "apple",
+                    "google", "microsoft", "meta", "openai", "chip", "cyber", "app store",
+                    "smartphone", "internet", "robot", "gadget"]),
+    ("Science", ["science", "space", "nasa", "research", "physics", "astronom",
+                 "biolog", "climate", "environment", "wildlife", "fossil", "quantum"]),
+    ("Health", ["health", "covid", "virus", "disease", "medical", "hospital", "vaccine",
+                "cancer", "outbreak", "ebola", "mental health", "fda", "medicine"]),
+    ("Sports", ["sport", "football", "soccer", "nba", "nfl", "baseball", "tennis",
+                "olympic", "cricket", "championship", "fifa", "premier league", "world cup"]),
+    ("Entertainment", ["film", "movie", "music", "celebrity", "hollywood", " tv ",
+                       "actor", "singer", "grammy", "oscar", "box office", "netflix", "concert"]),
+    ("Politics", ["politic", "election", "president", "congress", "senate", "parliament",
+                  "government", "campaign", "white house", "supreme court", "minister", "policy"]),
+    ("World", ["ukraine", "gaza", "israel", "china", "russia", "europe", "africa",
+               "migrant", "united nations", "border", "conflict", "war", "military"]),
+]
+
+
+def _news_categorize(title, summary):
+    text = f"{title or ''} {summary or ''}".lower()
+    for cat, keywords in NEWS_CATEGORIES:
+        if any(kw in text for kw in keywords):
+            return cat
+    return "General"
+
+
+def _news_localname(tag):
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _news_strip_html(text):
+    import re as _re
+    import html as _html
+    clean = _re.sub(r"<[^>]+>", "", text or "")
+    return _html.unescape(clean).strip()
+
+
+def _news_parse_date(s):
+    if not s:
+        return None
+    s = s.strip()
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(s).isoformat()
+    except Exception:
+        pass
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).isoformat()
+    except Exception:
+        return None
+
+
+def _news_parse_feed(source, xml_text):
+    import xml.etree.ElementTree as ET
+    items = []
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return items
+
+    for node in root.iter():
+        if _news_localname(node.tag) not in ("item", "entry"):
+            continue
+        title = link = summary = published = image = None
+        for child in node:
+            ln = _news_localname(child.tag)
+            if ln == "title" and child.text and not title:
+                title = child.text.strip()
+            elif ln == "link":
+                href = child.get("href")
+                if href:
+                    if child.get("rel") in (None, "alternate") and not link:
+                        link = href
+                elif child.text and not link:
+                    link = child.text.strip()
+            elif ln in ("description", "summary") and child.text and not summary:
+                summary = _news_strip_html(child.text)[:300]
+            elif ln in ("pubDate", "published", "updated") and child.text and not published:
+                published = _news_parse_date(child.text)
+            elif ln in ("content", "thumbnail", "enclosure"):
+                url = child.get("url")
+                ctype = child.get("type") or ""
+                if url and not image and (ln in ("thumbnail", "content") or "image" in ctype):
+                    image = url
+        if title and link:
+            items.append({
+                "source": source, "title": title, "link": link,
+                "summary": summary, "published": published, "image": image,
+                "category": _news_categorize(title, summary)
+            })
+    return items
+
+
+def _news_fetch_all():
+    import concurrent.futures as _cf
+
+    def fetch(feed):
+        source, url = feed
+        try:
+            resp = requests.get(
+                url, timeout=10,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; DashboardNewsBot/1.0)"}
+            )
+            if resp.status_code == 200:
+                return _news_parse_feed(source, resp.text)
+        except Exception:
+            pass
+        return []
+
+    results = []
+    with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+        for chunk in ex.map(fetch, NEWS_FEEDS):
+            results.extend(chunk)
+
+    results.sort(key=lambda it: it.get("published") or "", reverse=True)
+    return results
+
+
+@app.route("/news", methods=["GET"])
+@jwt_required()
+def get_news():
+    now = datetime.now().timestamp()
+    if _news_cache["data"] and (now - _news_cache["fetched_at"] < NEWS_CACHE_SECONDS):
+        items = _news_cache["data"]
+    else:
+        items = _news_fetch_all()
+        if items:
+            _news_cache["data"] = items
+            _news_cache["fetched_at"] = now
+        elif _news_cache["data"]:
+            items = _news_cache["data"]  # serve stale rather than nothing
+
+    source = request.args.get("source")
+    if source:
+        items = [it for it in items if it["source"] == source]
+
+    category = request.args.get("category")
+    if category:
+        items = [it for it in items if it.get("category") == category]
+
+    q = (request.args.get("q") or "").strip().lower()
+    if q:
+        items = [
+            it for it in items
+            if q in (it.get("title") or "").lower()
+            or q in (it.get("summary") or "").lower()
+            or q in (it.get("source") or "").lower()
+        ]
+
+    try:
+        limit = min(int(request.args.get("limit", 60)), 200)
+    except (TypeError, ValueError):
+        limit = 60
+
+    return {
+        "sources": [name for name, _ in NEWS_FEEDS],
+        "categories": [name for name, _ in NEWS_CATEGORIES] + ["General"],
+        "articles": items[:limit]
+    }
+
+
 # ==== Meal planner: recipe library, pantry, planning =====================
 
 STARTER_RECIPES = [

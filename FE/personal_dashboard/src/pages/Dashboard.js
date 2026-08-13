@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [todayEvents, setTodayEvents] = useState([]);
   const [todayChores, setTodayChores] = useState([]);
   const [todayMeals, setTodayMeals] = useState([]);
+  const [news, setNews] = useState([]);
   const [weather, setWeather] = useState(null);
   const [dashboardTitle, setDashboardTitle] = useState("Family Dashboard");
   const [familyPhoto, setFamilyPhoto] = useState("");
@@ -71,6 +72,11 @@ export default function Dashboard() {
       .then((data) => {
         setTodayMeals((data.meals || []).filter((m) => m.meal_date === todayKey));
       })
+      .catch(() => {});
+
+    fetch(`${API_URL}/news?limit=6`, { headers })
+      .then((res) => res.json())
+      .then((data) => setNews(data.articles || []))
       .catch(() => {});
   }, [token, todayKey]);
 
@@ -204,12 +210,74 @@ export default function Dashboard() {
           <Link to="/meal-planner" style={styles.cardLink}>Open Menu →</Link>
         </div>
       </div>
+
+      {news.length > 0 && (
+        <div style={styles.newsSection}>
+          <div style={styles.newsHeader}>
+            <h2 style={{ margin: 0 }}>📰 Latest News</h2>
+            <Link to="/news" style={styles.cardLink}>Open News →</Link>
+          </div>
+
+          <div style={styles.newsList}>
+            {news.map((a, i) => (
+              <a
+                key={`${a.link}-${i}`}
+                href={a.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={styles.newsItem}
+              >
+                <span style={styles.newsSource}>{a.source}</span>
+                <span style={styles.newsTitle}>{a.title}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 const styles = {
   page: theme.page,
+  newsSection: {
+    background: colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20
+  },
+  newsHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+    flexWrap: "wrap"
+  },
+  newsList: {
+    display: "flex",
+    flexDirection: "column"
+  },
+  newsItem: {
+    display: "flex",
+    gap: 10,
+    alignItems: "baseline",
+    padding: "10px 0",
+    borderTop: `1px solid ${colors.border}`,
+    textDecoration: "none",
+    color: colors.text
+  },
+  newsSource: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: colors.primary,
+    flexShrink: 0,
+    minWidth: 90
+  },
+  newsTitle: {
+    fontSize: 14,
+    lineHeight: 1.4
+  },
   familyPhoto: {
     width: "100%",
     objectFit: "cover",

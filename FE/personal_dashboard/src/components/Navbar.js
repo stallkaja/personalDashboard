@@ -8,6 +8,7 @@ import { API_URL } from "../config";
 
 const LINKS = [
   { to: "/", label: "Dashboard", icon: "🏠" },
+  { to: "/news", label: "News", icon: "📰" },
   { to: "/weather-center", label: "Weather Center", icon: "🌤️" },
   { to: "/calendar", label: "Calendar", icon: "📅" },
   { to: "/chores", label: "To Do List", icon: "✅" },

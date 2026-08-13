@@ -29,6 +29,7 @@ import ChoreDay from "./pages/ChoreDay";
 import MealPlanner from "./pages/MealPlanner";
 import MealDay from "./pages/MealDay";
 import PlanMeals from "./pages/PlanMeals";
+import News from "./pages/News";
 import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
@@ -68,6 +69,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/news"
+            element={
+              <ProtectedRoute>
+                <News />
               </ProtectedRoute>
             }
           />
