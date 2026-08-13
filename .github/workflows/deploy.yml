@@ -1,10 +1,16 @@
 name: Deploy to home server
 
-# Deploy on every push to main; also runnable manually from the Actions tab.
+# Auto-deploy on every push to main. Also runnable manually from the Actions tab,
+# where you can optionally switch the host to a different branch on demand.
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to deploy and pin the host to (blank = keep current pin)"
+        required: false
+        default: ""
 
 # Never run two deploys at once; queue them instead of overlapping.
 concurrency:
@@ -19,6 +25,12 @@ jobs:
         shell: powershell
         env:
           DEPLOY_TOKEN: ${{ github.token }}
+          DEPLOY_BRANCH: ${{ github.event.inputs.branch }}
         run: |
-          & "C:\Users\james\Documents\projects\personalDashboard\deploy.ps1"
+          $repo = "C:\Users\james\Documents\projects\personalDashboard"
+          if ($env:DEPLOY_BRANCH) {
+            & "$repo\switch-branch.ps1" $env:DEPLOY_BRANCH
+          } else {
+            & "$repo\deploy.ps1"
+          }
           exit $LASTEXITCODE

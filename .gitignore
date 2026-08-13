@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 vapid_private_key.pem
 secrets.json
+deploy-target.local
