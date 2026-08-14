@@ -5,6 +5,7 @@ import { useThemeMode } from "../context/ThemeContext";
 import useIsMobile from "../hooks/useIsMobile";
 import { colors } from "../styles/theme";
 import { API_URL } from "../config";
+import crest from "../assets/crest.png";
 
 const LINKS = [
   { to: "/", label: "Dashboard", icon: "🏠" },
@@ -173,8 +174,7 @@ export default function Navbar() {
   return (
     <aside style={styles.sidebar}>
       <div style={styles.sidebarBrand}>
-        <span style={styles.brandLogo} role="img" aria-label="home">🏡</span>
-        <span style={styles.brandName}>Stallkamp Dashboard</span>
+        <img src={crest} alt="Stallkamp" style={styles.brandCrest} />
       </div>
 
       <nav style={styles.sidebarLinks}>
@@ -213,18 +213,15 @@ const styles = {
   },
   sidebarBrand: {
     display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "18px 18px",
+    justifyContent: "center",
+    padding: "16px 12px",
     borderBottom: `1px solid ${colors.border}`
   },
-  brandLogo: { fontSize: 24, flexShrink: 0 },
-  brandName: {
-    fontWeight: "bold",
-    fontSize: 17,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis"
+  brandCrest: {
+    maxWidth: "90%",
+    maxHeight: 160,
+    objectFit: "contain",
+    display: "block"
   },
   sidebarLinks: {
     flex: 1,
