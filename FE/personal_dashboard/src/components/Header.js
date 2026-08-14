@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useThemeMode } from "../context/ThemeContext";
 import useIsMobile from "../hooks/useIsMobile";
 import { colors } from "../styles/theme";
 import { API_URL } from "../config";
@@ -16,6 +17,7 @@ function greetingFor(hour) {
 // right.
 export default function Header() {
   const { user, token, logout } = useAuth();
+  const { themeName, toggleTheme } = useThemeMode();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [now, setNow] = useState(new Date());
@@ -126,6 +128,11 @@ export default function Header() {
                 </button>
                 <button style={styles.menuItem} role="menuitem" onClick={() => go("/change-password")}>
                   <span style={styles.menuIcon} role="img" aria-label="password">🔑</span> Change password
+                </button>
+                <div style={styles.menuDivider} />
+                <button style={styles.menuItem} role="menuitem" onClick={toggleTheme}>
+                  <span style={styles.menuIcon} role="img" aria-label="theme">{themeName === "dark" ? "☀️" : "🌙"}</span>
+                  {themeName === "dark" ? "Light mode" : "Dark mode"}
                 </button>
                 <div style={styles.menuDivider} />
                 <button style={{ ...styles.menuItem, ...styles.menuDanger }} role="menuitem" onClick={handleLogout}>

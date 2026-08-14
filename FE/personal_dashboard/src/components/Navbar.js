@@ -193,13 +193,6 @@ export default function Navbar() {
           </Link>
         ))}
       </nav>
-
-      <div style={styles.sidebarFooter}>
-        <button style={styles.themeRow} onClick={toggleTheme} aria-label="Toggle theme">
-          <span style={styles.sideIcon}>{themeName === "dark" ? "☀️" : "🌙"}</span>
-          <span>{themeName === "dark" ? "Light mode" : "Dark mode"}</span>
-        </button>
-      </div>
     </aside>
   );
 }
@@ -264,27 +257,6 @@ const styles = {
   },
   sideIcon: { fontSize: 18, width: 22, textAlign: "center", flexShrink: 0 },
   sideLabel: { display: "flex", alignItems: "center", minWidth: 0 },
-  sidebarFooter: {
-    borderTop: `1px solid ${colors.border}`,
-    padding: 10,
-    display: "flex",
-    flexDirection: "column",
-    gap: 8
-  },
-  themeRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "none",
-    cursor: "pointer",
-    background: "transparent",
-    color: colors.text,
-    fontSize: 14,
-    textAlign: "left",
-    width: "100%"
-  },
   badge: {
     display: "inline-block",
     marginLeft: 6,
