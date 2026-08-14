@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useThemeMode } from "../context/ThemeContext";
 import useIsMobile from "../hooks/useIsMobile";
@@ -19,9 +19,8 @@ const LINKS = [
 ];
 
 export default function Navbar() {
-  const { user, token, logout } = useAuth();
+  const { user, token } = useAuth();
   const { themeName, toggleTheme } = useThemeMode();
-  const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,12 +77,6 @@ export default function Navbar() {
       link.label
     );
 
-  const handleLogout = () => {
-    logout();
-    setMenuOpen(false);
-    navigate("/login");
-  };
-
   // ---- Mobile: sticky top bar + slide-in drawer over a dimmed backdrop ----
   if (isMobile) {
     return (
@@ -98,7 +91,9 @@ export default function Navbar() {
             {unread > 0 && <span style={styles.hamburgerDot} />}
           </button>
 
-          <span style={styles.brand}>Stallkamp Dashboard</span>
+          <div style={styles.mobileBrand}>
+            <img src={crest} alt="Stallkamp" style={styles.brandCrestMobile} />
+          </div>
 
           <button style={styles.iconButton} onClick={toggleTheme} aria-label="Toggle theme">
             {themeName === "dark" ? "☀️" : "🌙"}
@@ -121,23 +116,11 @@ export default function Navbar() {
           }}
         >
           <div style={styles.drawerHeader}>
-            <span style={styles.drawerTitle}>Menu</span>
+            <img src={crest} alt="Stallkamp" style={styles.drawerCrest} />
             <button style={styles.iconButton} onClick={() => setMenuOpen(false)} aria-label="Close menu">
               ✕
             </button>
           </div>
-
-          {token && (
-            <div style={styles.drawerUser}>
-              <span style={styles.avatar}>
-                {(user?.username || "?").charAt(0).toUpperCase()}
-              </span>
-              <div>
-                <div style={styles.drawerName}>{user?.username || "Logged in"}</div>
-                {user?.role && <div style={styles.drawerRole}>{user.role}</div>}
-              </div>
-            </div>
-          )}
 
           <div style={styles.drawerLinks}>
             {links.map((link) => {
@@ -154,16 +137,6 @@ export default function Navbar() {
                 </Link>
               );
             })}
-          </div>
-
-          <div style={styles.drawerFooter}>
-            {token ? (
-              <button style={styles.logoutButton} onClick={handleLogout}>Log out</button>
-            ) : (
-              <button style={styles.logoutButton} onClick={() => { setMenuOpen(false); navigate("/login"); }}>
-                Log in
-              </button>
-            )}
           </div>
         </aside>
       </>
@@ -298,14 +271,17 @@ const styles = {
     borderRadius: "50%",
     background: colors.danger
   },
-  brand: {
-    fontWeight: "bold",
-    fontSize: 16,
+  mobileBrand: {
     flex: 1,
-    textAlign: "center",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap"
+    display: "flex",
+    justifyContent: "center",
+    minWidth: 0
+  },
+  brandCrestMobile: {
+    height: 34,
+    width: "auto",
+    objectFit: "contain",
+    display: "block"
   },
 
   // ---- Mobile drawer ----
@@ -339,29 +315,12 @@ const styles = {
     padding: "12px 8px 12px 16px",
     borderBottom: `1px solid ${colors.border}`
   },
-  drawerTitle: { fontWeight: "bold", fontSize: 16, opacity: 0.7 },
-  drawerUser: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    padding: "14px 16px",
-    borderBottom: `1px solid ${colors.border}`
-  },
-  avatar: {
-    width: 40,
+  drawerCrest: {
     height: 40,
-    borderRadius: "50%",
-    background: colors.primary,
-    color: colors.primaryText,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: "bold",
-    fontSize: 18,
-    flexShrink: 0
+    width: "auto",
+    objectFit: "contain",
+    display: "block"
   },
-  drawerName: { fontWeight: "bold", fontSize: 15 },
-  drawerRole: { fontSize: 12, opacity: 0.6, textTransform: "capitalize" },
   drawerLinks: {
     flex: 1,
     overflowY: "auto",
@@ -386,20 +345,5 @@ const styles = {
     fontWeight: "bold"
   },
   drawerIcon: { fontSize: 18, width: 24, textAlign: "center", flexShrink: 0 },
-  drawerLinkLabel: { display: "flex", alignItems: "center" },
-  drawerFooter: {
-    padding: 12,
-    borderTop: `1px solid ${colors.border}`
-  },
-  logoutButton: {
-    width: "100%",
-    padding: "12px",
-    borderRadius: 10,
-    border: "none",
-    cursor: "pointer",
-    background: colors.border,
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "bold"
-  }
+  drawerLinkLabel: { display: "flex", alignItems: "center" }
 };
