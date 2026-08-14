@@ -11,14 +11,10 @@ const LINKS = [
   { to: "/news", label: "News", icon: "📰" },
   { to: "/weather-center", label: "Weather Center", icon: "🌤️" },
   { to: "/calendar", label: "Calendar", icon: "📅" },
-  { to: "/chores", label: "To Do List", icon: "✅" },
-  { to: "/meal-planner", label: "Menu", icon: "🍽️" },
   { to: "/shopping-list", label: "Shopping List", icon: "🛒" },
   { to: "/photo-gallery", label: "Photos", icon: "🖼️" },
   { to: "/communication", label: "Messages", icon: "💬" },
-  { to: "/video-call", label: "Video Call", icon: "📹" },
-  { to: "/accounts", label: "Accounts", icon: "👤" },
-  { to: "/settings", label: "Settings", icon: "⚙️" }
+  { to: "/video-call", label: "Video Call", icon: "📹" }
 ];
 
 export default function Navbar() {
@@ -101,7 +97,7 @@ export default function Navbar() {
             {unread > 0 && <span style={styles.hamburgerDot} />}
           </button>
 
-          <span style={styles.brand}>Family Dashboard</span>
+          <span style={styles.brand}>Stallkamp Dashboard</span>
 
           <button style={styles.iconButton} onClick={toggleTheme} aria-label="Toggle theme">
             {themeName === "dark" ? "☀️" : "🌙"}
@@ -178,7 +174,7 @@ export default function Navbar() {
     <aside style={styles.sidebar}>
       <div style={styles.sidebarBrand}>
         <span style={styles.brandLogo} role="img" aria-label="home">🏡</span>
-        <span style={styles.brandName}>Family Dashboard</span>
+        <span style={styles.brandName}>Stallkamp Dashboard</span>
       </div>
 
       <nav style={styles.sidebarLinks}>

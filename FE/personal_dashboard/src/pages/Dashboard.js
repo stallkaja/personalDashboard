@@ -109,11 +109,11 @@ export default function Dashboard() {
             Calendar
           </Link>
 
-          <Link to="/chores" style={styles.secondaryButton}>
+          <Link to="/calendar" style={styles.secondaryButton}>
             To Do List
           </Link>
 
-          <Link to="/meal-planner" style={styles.secondaryButton}>
+          <Link to="/calendar" style={styles.secondaryButton}>
             Menu
           </Link>
 
@@ -191,7 +191,7 @@ export default function Dashboard() {
             ))
           )}
 
-          <Link to="/chores" style={styles.cardLink}>Open To Do List →</Link>
+          <Link to="/calendar" style={styles.cardLink}>Open To Do List →</Link>
         </div>
 
         <div style={styles.card}>
@@ -207,7 +207,7 @@ export default function Dashboard() {
             ))
           )}
 
-          <Link to="/meal-planner" style={styles.cardLink}>Open Menu →</Link>
+          <Link to="/calendar" style={styles.cardLink}>Open Menu →</Link>
         </div>
       </div>
 
