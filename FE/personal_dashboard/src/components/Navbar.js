@@ -17,7 +17,6 @@ const LINKS = [
   { to: "/photo-gallery", label: "Photos", icon: "🖼️" },
   { to: "/communication", label: "Messages", icon: "💬" },
   { to: "/video-call", label: "Video Call", icon: "📹" },
-  { to: "/career", label: "Job Search", icon: "💼" },
   { to: "/accounts", label: "Accounts", icon: "👤" },
   { to: "/settings", label: "Settings", icon: "⚙️" }
 ];
@@ -174,83 +173,168 @@ export default function Navbar() {
     );
   }
 
-  // ---- Desktop: horizontal bar --------------------------------------------
+  // ---- Desktop: vertical left sidebar -------------------------------------
   return (
-    <nav style={styles.navbar}>
-      <div style={styles.left}>
+    <aside style={styles.sidebar}>
+      <div style={styles.sidebarBrand}>
+        <span style={styles.brandLogo} role="img" aria-label="home">🏡</span>
+        <span style={styles.brandName}>Family Dashboard</span>
+      </div>
+
+      <nav style={styles.sidebarLinks}>
         {links.map((link) => (
           <Link
             key={link.to}
-            style={{ ...styles.link, ...(isActive(link.to) ? styles.linkActive : {}) }}
             to={link.to}
+            style={{ ...styles.sideLink, ...(isActive(link.to) ? styles.sideLinkActive : {}) }}
           >
-            {renderLabel(link)}
+            <span style={styles.sideIcon}>{link.icon}</span>
+            <span style={styles.sideLabel}>{renderLabel(link)}</span>
           </Link>
         ))}
-      </div>
+      </nav>
 
-      <div style={styles.right}>
-        <button style={styles.themeToggle} onClick={toggleTheme} aria-label="Toggle theme">
-          {themeName === "dark" ? "☀️" : "🌙"}
+      <div style={styles.sidebarFooter}>
+        <button style={styles.themeRow} onClick={toggleTheme} aria-label="Toggle theme">
+          <span style={styles.sideIcon}>{themeName === "dark" ? "☀️" : "🌙"}</span>
+          <span>{themeName === "dark" ? "Light mode" : "Dark mode"}</span>
         </button>
 
         {token ? (
-          <>
-            <span style={styles.userText}>
-              {user?.username || "Logged in"}
-              {user?.role ? ` (${user.role})` : ""}
-            </span>
-
-            <button style={styles.button} onClick={handleLogout}>
-              Logout
-            </button>
-          </>
+          <div style={styles.userRow}>
+            <span style={styles.avatarSm}>{(user?.username || "?").charAt(0).toUpperCase()}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={styles.userName}>{user?.username || "Logged in"}</div>
+              {user?.role && <div style={styles.userRole}>{user.role}</div>}
+            </div>
+            <button style={styles.logoutIcon} onClick={handleLogout} title="Log out" aria-label="Log out">⎋</button>
+          </div>
         ) : (
-          <button style={styles.button} onClick={() => navigate("/login")}>
-            Login
-          </button>
+          <button style={styles.logoutButton} onClick={() => navigate("/login")}>Log in</button>
         )}
       </div>
-    </nav>
+    </aside>
   );
 }
+
+const SIDEBAR_WIDTH = 240;
 
 const DRAWER_WIDTH = 280;
 
 const styles = {
-  navbar: {
+  // ---- Desktop sidebar ----
+  sidebar: {
+    width: SIDEBAR_WIDTH,
+    flexShrink: 0,
     background: colors.surfaceMuted,
     color: colors.text,
+    borderRight: `1px solid ${colors.border}`,
+    height: "100vh",
+    position: "sticky",
+    top: 0,
+    display: "flex",
+    flexDirection: "column"
+  },
+  sidebarBrand: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 20px",
-    gap: 16
+    gap: 10,
+    padding: "18px 18px",
+    borderBottom: `1px solid ${colors.border}`
   },
-  left: {
+  brandLogo: { fontSize: 24, flexShrink: 0 },
+  brandName: {
+    fontWeight: "bold",
+    fontSize: 17,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis"
+  },
+  sidebarLinks: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "10px 10px",
     display: "flex",
-    alignItems: "center",
-    gap: 16,
-    overflowX: "auto",
-    minWidth: 0
+    flexDirection: "column",
+    gap: 2
   },
-  right: {
+  sideLink: {
     display: "flex",
     alignItems: "center",
     gap: 12,
-    flexShrink: 0
-  },
-  link: {
+    padding: "10px 12px",
+    borderRadius: 10,
     color: colors.text,
     textDecoration: "none",
-    whiteSpace: "nowrap",
-    flexShrink: 0,
-    opacity: 0.75
+    fontSize: 15,
+    opacity: 0.85
   },
-  linkActive: {
-    opacity: 1,
+  sideLinkActive: {
+    background: colors.primary,
+    color: colors.primaryText,
     fontWeight: "bold",
-    color: colors.primary
+    opacity: 1
+  },
+  sideIcon: { fontSize: 18, width: 22, textAlign: "center", flexShrink: 0 },
+  sideLabel: { display: "flex", alignItems: "center", minWidth: 0 },
+  sidebarFooter: {
+    borderTop: `1px solid ${colors.border}`,
+    padding: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8
+  },
+  themeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "none",
+    cursor: "pointer",
+    background: "transparent",
+    color: colors.text,
+    fontSize: 14,
+    textAlign: "left",
+    width: "100%"
+  },
+  userRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "8px 10px",
+    borderRadius: 10,
+    background: colors.surface
+  },
+  avatarSm: {
+    width: 34,
+    height: 34,
+    borderRadius: "50%",
+    background: colors.primary,
+    color: colors.primaryText,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: "bold",
+    fontSize: 15,
+    flexShrink: 0
+  },
+  userName: {
+    fontWeight: "bold",
+    fontSize: 14,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
+  },
+  userRole: { fontSize: 12, opacity: 0.6, textTransform: "capitalize" },
+  logoutIcon: {
+    background: "transparent",
+    border: "none",
+    color: colors.text,
+    fontSize: 18,
+    cursor: "pointer",
+    padding: 4,
+    flexShrink: 0
   },
   badge: {
     display: "inline-block",
@@ -264,25 +348,6 @@ const styles = {
     fontWeight: "bold",
     textAlign: "center",
     lineHeight: "18px"
-  },
-  userText: {
-    opacity: 0.85
-  },
-  button: {
-    padding: "6px 12px",
-    borderRadius: 6,
-    border: "none",
-    cursor: "pointer",
-    flexShrink: 0,
-    background: colors.border,
-    color: colors.text
-  },
-  themeToggle: {
-    background: "transparent",
-    border: "none",
-    fontSize: 18,
-    cursor: "pointer",
-    flexShrink: 0
   },
 
   // ---- Mobile top bar ----
