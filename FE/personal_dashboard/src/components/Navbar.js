@@ -201,14 +201,16 @@ export default function Navbar() {
         </button>
 
         {token ? (
-          <div style={styles.userRow}>
-            <span style={styles.avatarSm}>{(user?.username || "?").charAt(0).toUpperCase()}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={styles.userName}>{user?.username || "Logged in"}</div>
-              {user?.role && <div style={styles.userRole}>{user.role}</div>}
+          <>
+            <div style={styles.userRow}>
+              <span style={styles.avatarSm}>{(user?.username || "?").charAt(0).toUpperCase()}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={styles.userName}>{user?.username || "Logged in"}</div>
+                {user?.role && <div style={styles.userRole}>{user.role}</div>}
+              </div>
             </div>
-            <button style={styles.logoutIcon} onClick={handleLogout} title="Log out" aria-label="Log out">⎋</button>
-          </div>
+            <button style={styles.logoutButton} onClick={handleLogout}>⎋ Log out</button>
+          </>
         ) : (
           <button style={styles.logoutButton} onClick={() => navigate("/login")}>Log in</button>
         )}
@@ -327,15 +329,6 @@ const styles = {
     whiteSpace: "nowrap"
   },
   userRole: { fontSize: 12, opacity: 0.6, textTransform: "capitalize" },
-  logoutIcon: {
-    background: "transparent",
-    border: "none",
-    color: colors.text,
-    fontSize: 18,
-    cursor: "pointer",
-    padding: 4,
-    flexShrink: 0
-  },
   badge: {
     display: "inline-block",
     marginLeft: 6,
