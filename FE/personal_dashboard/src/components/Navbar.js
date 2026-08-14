@@ -199,21 +199,6 @@ export default function Navbar() {
           <span style={styles.sideIcon}>{themeName === "dark" ? "☀️" : "🌙"}</span>
           <span>{themeName === "dark" ? "Light mode" : "Dark mode"}</span>
         </button>
-
-        {token ? (
-          <>
-            <div style={styles.userRow}>
-              <span style={styles.avatarSm}>{(user?.username || "?").charAt(0).toUpperCase()}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={styles.userName}>{user?.username || "Logged in"}</div>
-                {user?.role && <div style={styles.userRole}>{user.role}</div>}
-              </div>
-            </div>
-            <button style={styles.logoutButton} onClick={handleLogout}>⎋ Log out</button>
-          </>
-        ) : (
-          <button style={styles.logoutButton} onClick={() => navigate("/login")}>Log in</button>
-        )}
       </div>
     </aside>
   );
@@ -300,35 +285,6 @@ const styles = {
     textAlign: "left",
     width: "100%"
   },
-  userRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "8px 10px",
-    borderRadius: 10,
-    background: colors.surface
-  },
-  avatarSm: {
-    width: 34,
-    height: 34,
-    borderRadius: "50%",
-    background: colors.primary,
-    color: colors.primaryText,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: "bold",
-    fontSize: 15,
-    flexShrink: 0
-  },
-  userName: {
-    fontWeight: "bold",
-    fontSize: 14,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap"
-  },
-  userRole: { fontSize: 12, opacity: 0.6, textTransform: "capitalize" },
   badge: {
     display: "inline-block",
     marginLeft: 6,
