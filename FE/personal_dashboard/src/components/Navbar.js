@@ -5,7 +5,6 @@ import { useThemeMode } from "../context/ThemeContext";
 import useIsMobile from "../hooks/useIsMobile";
 import { colors } from "../styles/theme";
 import { API_URL } from "../config";
-import crest from "../assets/crest.png";
 
 const LINKS = [
   { to: "/", label: "Dashboard", icon: "🏠" },
@@ -92,7 +91,7 @@ export default function Navbar() {
           </button>
 
           <div style={styles.mobileBrand}>
-            <img src={crest} alt="Stallkamp" style={styles.brandCrestMobile} />
+            <span style={{ ...styles.monogram, fontSize: 24 }}>SS</span>
           </div>
 
           <button style={styles.iconButton} onClick={toggleTheme} aria-label="Toggle theme">
@@ -116,7 +115,7 @@ export default function Navbar() {
           }}
         >
           <div style={styles.drawerHeader}>
-            <img src={crest} alt="Stallkamp" style={styles.drawerCrest} />
+            <span style={{ ...styles.monogram, fontSize: 28 }}>SS</span>
             <button style={styles.iconButton} onClick={() => setMenuOpen(false)} aria-label="Close menu">
               ✕
             </button>
@@ -147,7 +146,7 @@ export default function Navbar() {
   return (
     <aside style={styles.sidebar}>
       <div style={styles.sidebarBrand}>
-        <img src={crest} alt="Stallkamp" style={styles.brandCrest} />
+        <span style={{ ...styles.monogram, fontSize: 46 }}>SS</span>
       </div>
 
       <nav style={styles.sidebarLinks}>
@@ -190,11 +189,13 @@ const styles = {
     padding: "16px 12px",
     borderBottom: `1px solid ${colors.border}`
   },
-  brandCrest: {
-    maxWidth: "90%",
-    maxHeight: 160,
-    objectFit: "contain",
-    display: "block"
+  monogram: {
+    fontFamily: "Georgia, 'Times New Roman', serif",
+    fontWeight: "bold",
+    color: colors.primary,
+    letterSpacing: 3,
+    lineHeight: 1,
+    userSelect: "none"
   },
   sidebarLinks: {
     flex: 1,
@@ -277,12 +278,6 @@ const styles = {
     justifyContent: "center",
     minWidth: 0
   },
-  brandCrestMobile: {
-    height: 34,
-    width: "auto",
-    objectFit: "contain",
-    display: "block"
-  },
 
   // ---- Mobile drawer ----
   backdrop: {
@@ -314,12 +309,6 @@ const styles = {
     justifyContent: "space-between",
     padding: "12px 8px 12px 16px",
     borderBottom: `1px solid ${colors.border}`
-  },
-  drawerCrest: {
-    height: 40,
-    width: "auto",
-    objectFit: "contain",
-    display: "block"
   },
   drawerLinks: {
     flex: 1,
