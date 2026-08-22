@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import useIsMobile from "../hooks/useIsMobile";
 import theme, { colors } from "../styles/theme";
+import SftpShares from "./admin/SftpShares";
 
 import { API_URL } from "../config";
 
@@ -12,6 +13,7 @@ const SECTIONS = [
   { key: "create", label: "Create User", icon: "➕" },
   { key: "invite", label: "Invite", icon: "✉️" },
   { key: "database", label: "Database", icon: "🗄️" },
+  { key: "sftp", label: "SFTP Shares", icon: "📁" },
   { key: "video_activity", label: "Video Activity", icon: "📺" },
   { key: "system", label: "System", icon: "🔄" },
   { key: "session", label: "My Session", icon: "🔑" }
@@ -611,6 +613,7 @@ export default function Admin() {
       case "create": return renderCreate();
       case "invite": return renderInvite();
       case "database": return renderDatabase();
+      case "sftp": return <SftpShares token={token} />;
       case "video_activity": return renderVideoActivity();
       case "system": return renderSystem();
       case "session": return renderSession();

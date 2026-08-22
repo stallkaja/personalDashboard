@@ -6,5 +6,6 @@ FE/personal_dashboard/node_modules/
 __pycache__/
 *.pyc
 vapid_private_key.pem
+sftp_host_key.pem
 secrets.json
 deploy-target.local

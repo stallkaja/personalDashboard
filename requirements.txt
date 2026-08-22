@@ -17,6 +17,12 @@ requests==2.34.2
 cryptography==49.0.0
 tzdata==2026.2
 
+# SFTP server (admin-configured shared folders over SFTP, port 2222).
+# Auth is against real Windows accounts via pywin32; only local
+# Administrators may log in (see sftp_server.py).
+paramiko==5.0.0
+pywin32==312
+
 # Transitive (pinned for reproducibility; pip would pull these anyway)
 python-socketio==5.16.3
 python-engineio==4.13.2

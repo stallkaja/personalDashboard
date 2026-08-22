@@ -32,6 +32,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+import sftp_server
+
 
 def _load_secrets():
     """Load sensitive config from a gitignored secrets.json next to this file.
@@ -620,6 +622,16 @@ def ensure_feature_tables():
     cursor.execute("SELECT COUNT(*) FROM app_settings WHERE id=1")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO app_settings (id) VALUES (1)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sftp_shares (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL UNIQUE,
+            real_path VARCHAR(500) NOT NULL,
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_settings (
@@ -3880,6 +3892,174 @@ def resolve_local_video_path(relpath):
     return candidate, base_dir
 
 
+# --- SFTP share management ---------------------------------------------
+# Admin-only management of which local folders are exposed by the built-in
+# SFTP server (sftp_server.py). SFTP login itself authenticates against real
+# Windows Administrator accounts, independent of this app's own users.
+
+_SFTP_DANGEROUS_ROOTS = [
+    r"C:\Windows",
+    r"C:\Program Files",
+    r"C:\Program Files (x86)",
+    BASE_DIR,  # the dashboard's own repo folder
+]
+
+
+def _is_dangerous_share_root(real_path):
+    """Reject sharing a drive root or a well-known system/repo folder (or
+    anything that contains one of them), to avoid accidentally exposing the
+    whole machine over SFTP."""
+    drive, tail = os.path.splitdrive(real_path)
+    if tail in ("\\", "/", ""):
+        return True  # a bare drive root, e.g. "C:\"
+
+    for dangerous in _SFTP_DANGEROUS_ROOTS:
+        dangerous = os.path.realpath(dangerous)
+        if real_path == dangerous or real_path.startswith(dangerous + os.sep):
+            return True
+        if dangerous.startswith(real_path + os.sep):
+            return True  # sharing a folder that itself contains a dangerous root
+
+    return False
+
+
+@app.route("/admin/sftp/shares", methods=["GET"])
+@jwt_required()
+def list_sftp_shares():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT id, name, real_path, created_by, created_at FROM sftp_shares ORDER BY name
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {"shares": [
+        {
+            "id": r[0], "name": r[1], "real_path": r[2], "created_by": r[3],
+            "created_at": r[4].isoformat() if r[4] else None
+        }
+        for r in rows
+    ]}
+
+
+@app.route("/admin/sftp/shares", methods=["POST"])
+@jwt_required()
+def add_sftp_share():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    data = request.json or {}
+    raw_name = (data.get("name") or "").strip()
+    raw_path = (data.get("path") or "").strip()
+
+    if not raw_name or not raw_path:
+        return {"error": "name and path are required"}, 400
+
+    name = secure_filename(raw_name)
+    if not name:
+        return {"error": "Invalid share name"}, 400
+
+    real_path = os.path.realpath(raw_path)
+    if not os.path.isdir(real_path):
+        return {"error": f"Not a folder: {real_path}"}, 400
+
+    if _is_dangerous_share_root(real_path):
+        return {"error": f"Refusing to share a system/drive-root folder: {real_path}"}, 400
+
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO sftp_shares (name, real_path, created_by) VALUES (%s, %s, %s)",
+            (name, real_path, int(get_jwt_identity()))
+        )
+        db.commit()
+    except mysql.connector.IntegrityError:
+        cursor.close()
+        db.close()
+        return {"error": "A share with that name already exists"}, 409
+    cursor.close()
+    db.close()
+
+    return {"status": "added"}, 201
+
+
+@app.route("/admin/sftp/shares/<int:share_id>", methods=["DELETE"])
+@jwt_required()
+def remove_sftp_share(share_id):
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM sftp_shares WHERE id=%s", (share_id,))
+    db.commit()
+    deleted = cursor.rowcount
+    cursor.close()
+    db.close()
+
+    if not deleted:
+        return {"error": "Share not found"}, 404
+    return {"status": "removed"}  # unshares only — never touches the real folder on disk
+
+
+@app.route("/admin/sftp/browse", methods=["GET"])
+@jwt_required()
+def browse_local_filesystem():
+    # Deliberately NOT chrooted like resolve_local_video_path() — this is a
+    # read-only folder *picker* (directory names only, no file listing or
+    # contents) for an already admin_required()-gated user, so it can reach
+    # anywhere on local disks. That's the whole point: picking which folder
+    # to share.
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    path = (request.args.get("path") or "").strip()
+
+    if not path:
+        import string
+        drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+        return {"path": "", "folders": [{"name": d, "path": d} for d in drives]}
+
+    if not os.path.isdir(path):
+        return {"error": "Folder not found"}, 404
+
+    folders = []
+    try:
+        for entry in os.scandir(path):
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    folders.append(entry.name)
+            except OSError:
+                continue  # skip entries we can't stat (e.g. System Volume Information)
+    except OSError as e:
+        return {"error": str(e)}, 500
+
+    folders.sort(key=str.lower)
+    return {
+        "path": path,
+        "folders": [{"name": name, "path": os.path.join(path, name)} for name in folders]
+    }
+
+
+@app.route("/admin/sftp/status", methods=["GET"])
+@jwt_required()
+def sftp_status():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+    status = sftp_server.get_sftp_status()
+    return {
+        "running": status["running"],
+        "port": status["port"],
+        "fingerprint": status["fingerprint"]
+    }
+
+
 @app.route("/local-videos", methods=["GET"])
 @jwt_required()
 def list_local_videos():
@@ -4209,6 +4389,8 @@ def poll_ambient_weather():
 
 
 threading.Thread(target=poll_ambient_weather, daemon=True).start()
+
+sftp_server.start_sftp_server_thread()
 
 
 @app.route("/local-videos/convert", methods=["POST"])
