@@ -3,6 +3,12 @@ import useIsMobile from "../../hooks/useIsMobile";
 import theme, { colors } from "../../styles/theme";
 import { API_URL } from "../../config";
 
+// One-time, elevated, host-side step — Claude/the app can't run this itself
+// (it's a system/firewall change), so it's surfaced here as a copy-paste
+// command instead of a button that would silently modify Windows settings.
+const FIREWALL_COMMAND =
+  'New-NetFirewallRule -DisplayName "Dashboard SFTP" -Direction Inbound -Protocol TCP -LocalPort 2222 -Action Allow';
+
 export default function SftpShares({ token }) {
   const isMobile = useIsMobile();
 
@@ -22,6 +28,8 @@ export default function SftpShares({ token }) {
   const [selectedFolder, setSelectedFolder] = useState(null); // {name, path}
   const [newShareName, setNewShareName] = useState("");
   const [adding, setAdding] = useState(false);
+
+  const [copied, setCopied] = useState(false);
 
   const authHeaders = {
     "Content-Type": "application/json",
@@ -149,6 +157,17 @@ export default function SftpShares({ token }) {
     }
   };
 
+  const copyFirewallCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(FIREWALL_COMMAND);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error(err);
+      setStatusError("Couldn't copy automatically — select and copy the command manually.");
+    }
+  };
+
   const removeShare = async (share) => {
     if (!window.confirm(
       `Stop sharing "/${share.name}"? The real folder on disk will not be deleted.`
@@ -187,6 +206,19 @@ export default function SftpShares({ token }) {
       )}
       {statusError && <div style={theme.error}>{statusError}</div>}
       {sharesError && <div style={theme.error}>{sharesError}</div>}
+
+      <div style={styles.setupCard}>
+        <strong>One-time Windows setup (run on the host, elevated)</strong>
+        <p style={styles.muted}>
+          The dashboard app can't change Windows Firewall itself. To let SFTP clients
+          (WinSCP, FileZilla, etc.) reach port 2222 from your network, open an
+          <strong> elevated PowerShell</strong> on the host machine and run:
+        </p>
+        <pre style={styles.codeBlock}><code>{FIREWALL_COMMAND}</code></pre>
+        <button style={styles.smallButton} onClick={copyFirewallCommand}>
+          {copied ? "Copied ✓" : "Copy command"}
+        </button>
+      </div>
 
       <div style={{ ...styles.dualPane, flexDirection: isMobile ? "column" : "row" }}>
         {/* LEFT: local filesystem browser */}
@@ -276,6 +308,23 @@ const styles = {
   muted: { opacity: 0.7, marginTop: -4 },
   button: theme.button,
   smallButton: theme.smallButton,
+  setupCard: {
+    background: colors.surfaceAlt,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6
+  },
+  codeBlock: {
+    background: colors.surfaceMuted,
+    borderRadius: 8,
+    padding: 12,
+    overflowX: "auto",
+    fontSize: 13,
+    margin: 0
+  },
   dualPane: {
     display: "flex",
     gap: 16,

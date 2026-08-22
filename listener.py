@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - Python < 3.9
 from werkzeug.utils import secure_filename
 from pywebpush import webpush, WebPushException
 import bcrypt
+import concurrent.futures
 import mysql.connector
 import os
 import uuid
@@ -4008,6 +4009,56 @@ def remove_sftp_share(share_id):
     return {"status": "removed"}  # unshares only — never touches the real folder on disk
 
 
+def _list_drive_letters_with_timeout(timeout_seconds=1.5):
+    """List existing drive letters, but never let a single stale/unreachable
+    one (e.g. a mapped network drive whose target is offline — os.path.exists
+    on a dead UNC-backed drive letter can hang for a long time on Windows)
+    stall the whole request. Whatever hasn't answered within timeout_seconds
+    is just skipped; its background thread is abandoned rather than waited on.
+    """
+    import string
+    candidates = [f"{d}:\\" for d in string.ascii_uppercase]
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(candidates))
+    futures = {pool.submit(os.path.exists, c): c for c in candidates}
+    done, _pending = concurrent.futures.wait(futures.keys(), timeout=timeout_seconds)
+
+    drives = []
+    for future in done:
+        try:
+            if future.result():
+                drives.append(futures[future])
+        except Exception:
+            continue
+
+    pool.shutdown(wait=False)  # let any still-hung workers die in the background
+    return sorted(drives)
+
+
+def _scandir_folders_with_timeout(path, timeout_seconds=5):
+    """os.scandir(path), but bounded — a path backed by an unreachable
+    network location can otherwise hang the request indefinitely. Raises
+    TimeoutError if the listing doesn't complete in time."""
+    def _do_scan():
+        names = []
+        for entry in os.scandir(path):
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    names.append(entry.name)
+            except OSError:
+                continue  # skip entries we can't stat (e.g. System Volume Information)
+        return names
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(_do_scan)
+    try:
+        result = future.result(timeout=timeout_seconds)
+    except concurrent.futures.TimeoutError:
+        pool.shutdown(wait=False)  # don't block the request on the stuck worker
+        raise TimeoutError(f"scandir timed out for {path}")
+    pool.shutdown(wait=False)
+    return result
+
+
 @app.route("/admin/sftp/browse", methods=["GET"])
 @jwt_required()
 def browse_local_filesystem():
@@ -4022,21 +4073,16 @@ def browse_local_filesystem():
     path = (request.args.get("path") or "").strip()
 
     if not path:
-        import string
-        drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+        drives = _list_drive_letters_with_timeout()
         return {"path": "", "folders": [{"name": d, "path": d} for d in drives]}
 
     if not os.path.isdir(path):
         return {"error": "Folder not found"}, 404
 
-    folders = []
     try:
-        for entry in os.scandir(path):
-            try:
-                if entry.is_dir(follow_symlinks=False):
-                    folders.append(entry.name)
-            except OSError:
-                continue  # skip entries we can't stat (e.g. System Volume Information)
+        folders = _scandir_folders_with_timeout(path)
+    except TimeoutError:
+        return {"error": f"Timed out reading {path} (unreachable network location?)"}, 504
     except OSError as e:
         return {"error": str(e)}, 500
 
