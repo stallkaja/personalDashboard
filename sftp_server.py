@@ -25,6 +25,7 @@ import time
 import paramiko
 import pywintypes
 import win32con
+import win32net
 import win32security
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,11 +55,17 @@ def _split_domain(username):
     return ".", username
 
 
+def _sids_equal(a, b):
+    # pywin32 doesn't expose the Win32 EqualSid API directly; comparing the
+    # canonical string form (e.g. "S-1-5-32-544") is the standard workaround.
+    return win32security.ConvertSidToStringSid(a) == win32security.ConvertSidToStringSid(b)
+
+
 def _is_windows_admin(token):
     """True iff the logon token's group list includes the well-known local
     Administrators SID."""
     groups = win32security.GetTokenInformation(token, win32security.TokenGroups)
-    return any(win32security.EqualSid(sid, _ADMINISTRATORS_SID) for sid, _attrs in groups)
+    return any(_sids_equal(sid, _ADMINISTRATORS_SID) for sid, _attrs in groups)
 
 
 def _authenticate_windows(username, password):
@@ -83,6 +90,75 @@ def _authenticate_windows(username, password):
             token.Close()
 
 
+def _is_local_admin_by_name(username):
+    """Passwordless check: is `username` currently a member of the local
+    Administrators group? Used for public-key auth, where there is no
+    password to LogonUser with — we trust the signature (paramiko already
+    verified it cryptographically before check_auth_publickey is ever
+    called; see its docstring) and independently confirm group membership
+    by name via the local SAM, no credential involved."""
+    domain, user = _split_domain(username)
+    try:
+        sid, _domain, _type = win32security.LookupAccountName(None, user)
+    except pywintypes.error:
+        return False
+    try:
+        members, _total, _resume = win32net.NetLocalGroupGetMembers(None, "Administrators", 0)
+    except pywintypes.error:
+        return False
+    return any(_sids_equal(sid, m["sid"]) for m in members)
+
+
+def _get_authorized_keys(username):
+    """Public keys an admin has registered (via the dashboard's admin-gated
+    UI) for this Windows username. Parsing failures for a stored row are
+    skipped rather than raising, so one bad row can't break auth for
+    everyone."""
+    from listener import get_db
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT public_key FROM sftp_authorized_keys WHERE windows_username=%s",
+        (username,)
+    )
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    keys = []
+    for (public_key_line,) in rows:
+        try:
+            keys.append(_parse_public_key_line(public_key_line))
+        except (ValueError, IndexError):
+            continue
+    return keys
+
+
+def _parse_public_key_line(line):
+    """Parse an authorized_keys-style line ('ssh-rsa AAAA... comment') into
+    a paramiko key object, the same wire format ssh-keygen produces."""
+    parts = line.strip().split()
+    if len(parts) < 2:
+        raise ValueError("invalid public key line")
+    key_type, b64blob = parts[0], parts[1]
+    blob = base64.b64decode(b64blob)
+    if key_type == "ssh-rsa":
+        return paramiko.RSAKey(data=blob)
+    if key_type == "ssh-ed25519":
+        return paramiko.Ed25519Key(data=blob)
+    if key_type.startswith("ecdsa-sha2-"):
+        return paramiko.ECDSAKey(data=blob)
+    raise ValueError(f"unsupported key type: {key_type}")
+
+
+def _authorize_publickey(username, key):
+    if not _is_local_admin_by_name(username):
+        return False
+    presented = key.asbytes()
+    return any(stored.asbytes() == presented for stored in _get_authorized_keys(username))
+
+
 class DashboardServerInterface(paramiko.ServerInterface):
     def check_auth_password(self, username, password):
         if _authenticate_windows(username, password):
@@ -90,10 +166,15 @@ class DashboardServerInterface(paramiko.ServerInterface):
         return paramiko.AUTH_FAILED
 
     def check_auth_publickey(self, username, key):
-        return paramiko.AUTH_FAILED  # password-only; no public-key store
+        # paramiko has already cryptographically verified the client holds
+        # the private key for `key` by the time this is called with a real
+        # attempt — our job is just "is this key authorized for this user".
+        if _authorize_publickey(username, key):
+            return paramiko.AUTH_SUCCESSFUL
+        return paramiko.AUTH_FAILED
 
     def get_allowed_auths(self, username):
-        return "password"
+        return "password,publickey"
 
     def check_channel_request(self, kind, chanid):
         return paramiko.OPEN_SUCCEEDED

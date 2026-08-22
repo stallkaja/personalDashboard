@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - Python < 3.9
     ZoneInfo = None
 from werkzeug.utils import secure_filename
 from pywebpush import webpush, WebPushException
+import base64
 import bcrypt
 import concurrent.futures
 import mysql.connector
@@ -629,6 +630,17 @@ def ensure_feature_tables():
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(100) NOT NULL UNIQUE,
             real_path VARCHAR(500) NOT NULL,
+            created_by INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sftp_authorized_keys (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            windows_username VARCHAR(255) NOT NULL,
+            public_key TEXT NOT NULL,
+            label VARCHAR(100),
             created_by INT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -4057,6 +4069,99 @@ def _scandir_folders_with_timeout(path, timeout_seconds=5):
         raise TimeoutError(f"scandir timed out for {path}")
     pool.shutdown(wait=False)
     return result
+
+
+@app.route("/admin/sftp/authorized-keys", methods=["GET"])
+@jwt_required()
+def list_sftp_authorized_keys():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT id, windows_username, public_key, label, created_by, created_at
+        FROM sftp_authorized_keys ORDER BY windows_username
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {"keys": [
+        {
+            "id": r[0], "windows_username": r[1],
+            # fingerprint only — never echo the full key blob back unnecessarily
+            "fingerprint": _ssh_key_fingerprint(r[2]),
+            "label": r[3], "created_by": r[4],
+            "created_at": r[5].isoformat() if r[5] else None
+        }
+        for r in rows
+    ]}
+
+
+def _ssh_key_fingerprint(public_key_line):
+    try:
+        key = sftp_server._parse_public_key_line(public_key_line)
+        return "SHA256:" + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
+    except (ValueError, IndexError):
+        return None
+
+
+@app.route("/admin/sftp/authorized-keys", methods=["POST"])
+@jwt_required()
+def add_sftp_authorized_key():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    data = request.json or {}
+    windows_username = (data.get("windows_username") or "").strip()
+    public_key = (data.get("public_key") or "").strip()
+    label = (data.get("label") or "").strip() or None
+
+    if not windows_username or not public_key:
+        return {"error": "windows_username and public_key are required"}, 400
+
+    try:
+        sftp_server._parse_public_key_line(public_key)
+    except (ValueError, IndexError) as e:
+        return {"error": f"Invalid public key: {e}"}, 400
+
+    if not sftp_server._is_local_admin_by_name(windows_username):
+        return {
+            "error": f"\"{windows_username}\" is not a current local Administrator on this machine"
+        }, 400
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "INSERT INTO sftp_authorized_keys (windows_username, public_key, label, created_by) "
+        "VALUES (%s, %s, %s, %s)",
+        (windows_username, public_key, label, int(get_jwt_identity()))
+    )
+    db.commit()
+    cursor.close()
+    db.close()
+
+    return {"status": "added"}, 201
+
+
+@app.route("/admin/sftp/authorized-keys/<int:key_id>", methods=["DELETE"])
+@jwt_required()
+def remove_sftp_authorized_key(key_id):
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM sftp_authorized_keys WHERE id=%s", (key_id,))
+    db.commit()
+    deleted = cursor.rowcount
+    cursor.close()
+    db.close()
+
+    if not deleted:
+        return {"error": "Key not found"}, 404
+    return {"status": "removed"}
 
 
 @app.route("/admin/sftp/browse", methods=["GET"])

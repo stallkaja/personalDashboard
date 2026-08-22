@@ -31,6 +31,14 @@ export default function SftpShares({ token }) {
 
   const [copied, setCopied] = useState(false);
 
+  const [authorizedKeys, setAuthorizedKeys] = useState([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [keysError, setKeysError] = useState("");
+  const [keyUsername, setKeyUsername] = useState("");
+  const [keyPublicKey, setKeyPublicKey] = useState("");
+  const [keyLabel, setKeyLabel] = useState("");
+  const [addingKey, setAddingKey] = useState(false);
+
   const authHeaders = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`
@@ -103,10 +111,34 @@ export default function SftpShares({ token }) {
     }
   }, [token]);
 
+  const loadAuthorizedKeys = useCallback(async () => {
+    if (!token) return;
+    try {
+      setKeysLoading(true);
+      setKeysError("");
+      const res = await fetch(`${API_URL}/admin/sftp/authorized-keys`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthorizedKeys([]);
+        setKeysError(data.error || "Failed to load authorized keys");
+        return;
+      }
+      setAuthorizedKeys(Array.isArray(data.keys) ? data.keys : []);
+    } catch (err) {
+      console.error(err);
+      setKeysError("Network error loading authorized keys");
+    } finally {
+      setKeysLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     loadStatus();
     loadShares();
     loadFolders("");
+    loadAuthorizedKeys();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -165,6 +197,57 @@ export default function SftpShares({ token }) {
     } catch (err) {
       console.error(err);
       setStatusError("Couldn't copy automatically — select and copy the command manually.");
+    }
+  };
+
+  const addAuthorizedKey = async () => {
+    if (!keyUsername.trim() || !keyPublicKey.trim()) return;
+    try {
+      setAddingKey(true);
+      setKeysError("");
+      const res = await fetch(`${API_URL}/admin/sftp/authorized-keys`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          windows_username: keyUsername.trim(),
+          public_key: keyPublicKey.trim(),
+          label: keyLabel.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeysError(data.error || "Failed to add key");
+        return;
+      }
+      setKeyUsername("");
+      setKeyPublicKey("");
+      setKeyLabel("");
+      loadAuthorizedKeys();
+    } catch (err) {
+      console.error(err);
+      setKeysError("Network error adding key");
+    } finally {
+      setAddingKey(false);
+    }
+  };
+
+  const removeAuthorizedKey = async (key) => {
+    if (!window.confirm(`Remove the key "${key.label || key.fingerprint}" for ${key.windows_username}?`)) return;
+    try {
+      setKeysError("");
+      const res = await fetch(`${API_URL}/admin/sftp/authorized-keys/${key.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeysError(data.error || "Failed to remove key");
+        return;
+      }
+      loadAuthorizedKeys();
+    } catch (err) {
+      console.error(err);
+      setKeysError("Network error removing key");
     }
   };
 
@@ -298,6 +381,63 @@ export default function SftpShares({ token }) {
           )}
         </div>
       </div>
+
+      <div style={styles.setupCard}>
+        <strong>Authorized SSH Keys (passwordless login)</strong>
+        <p style={styles.muted}>
+          Grant SFTP access to a Windows Administrator account using a public key instead
+          of a password — useful for automation/testing. Only the current members of the
+          local Administrators group can be granted access this way; paste a{" "}
+          <em>public</em> key only (never a private key).
+        </p>
+        {keysError && <div style={theme.error}>{keysError}</div>}
+
+        <div style={styles.keyForm}>
+          <input
+            style={theme.input}
+            placeholder="Windows username (e.g. james)"
+            value={keyUsername}
+            onChange={(e) => setKeyUsername(e.target.value)}
+          />
+          <textarea
+            style={styles.keyTextarea}
+            placeholder="ssh-rsa AAAA... or ssh-ed25519 AAAA..."
+            value={keyPublicKey}
+            onChange={(e) => setKeyPublicKey(e.target.value)}
+          />
+          <input
+            style={theme.input}
+            placeholder="Label (optional, e.g. claude-automation)"
+            value={keyLabel}
+            onChange={(e) => setKeyLabel(e.target.value)}
+          />
+          <button
+            style={styles.button}
+            disabled={!keyUsername.trim() || !keyPublicKey.trim() || addingKey}
+            onClick={addAuthorizedKey}
+          >
+            {addingKey ? "Adding…" : "Add key"}
+          </button>
+        </div>
+
+        {keysLoading && <p style={styles.muted}>Loading…</p>}
+        {!keysLoading && authorizedKeys.length === 0 ? (
+          <p style={styles.muted}>No authorized keys configured.</p>
+        ) : (
+          <ul style={styles.folderList}>
+            {authorizedKeys.map((k) => (
+              <li key={k.id} style={styles.folderRow}>
+                <span style={styles.folderName}>
+                  🔑 {k.windows_username} — {k.label || "(no label)"} — {k.fingerprint}
+                </span>
+                <button style={theme.dangerButton} onClick={() => removeAuthorizedKey(k)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -324,6 +464,24 @@ const styles = {
     overflowX: "auto",
     fontSize: 13,
     margin: 0
+  },
+  keyForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    maxWidth: 480,
+    marginBottom: 8
+  },
+  keyTextarea: {
+    padding: 10,
+    borderRadius: 8,
+    border: "none",
+    fontSize: 13,
+    fontFamily: "monospace",
+    minHeight: 60,
+    resize: "vertical",
+    width: "100%",
+    boxSizing: "border-box"
   },
   dualPane: {
     display: "flex",
