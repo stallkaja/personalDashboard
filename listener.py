@@ -4198,6 +4198,135 @@ def browse_local_filesystem():
     }
 
 
+def _scandir_entries_with_timeout(path, timeout_seconds=5):
+    """Like _scandir_folders_with_timeout, but returns files too (with size),
+    for the file-transfer UI. Bounded the same way — a path backed by an
+    unreachable network location can't hang the request."""
+    def _do_scan():
+        out = []
+        for entry in os.scandir(path):
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+                size = 0 if is_dir else entry.stat().st_size
+                out.append({"name": entry.name, "is_dir": is_dir, "size": size})
+            except OSError:
+                continue
+        return out
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(_do_scan)
+    try:
+        result = future.result(timeout=timeout_seconds)
+    except concurrent.futures.TimeoutError:
+        pool.shutdown(wait=False)
+        raise TimeoutError(f"scandir timed out for {path}")
+    pool.shutdown(wait=False)
+    return result
+
+
+# --- SFTP file transfer (browser <-> host, within configured shares) -------
+# Separate from /admin/sftp/browse (which walks the HOST's raw disks for
+# picking folders to share). These walk the virtual share filesystem itself
+# - the same one SFTP clients see - so a dashboard admin can copy files
+# between their own device and the host without a separate SFTP client.
+
+@app.route("/admin/sftp/remote/list", methods=["GET"])
+@jwt_required()
+def sftp_remote_list():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    virtual_path = (request.args.get("path") or "").strip()
+
+    try:
+        real_path, is_root = sftp_server._resolve_share_path(virtual_path)
+    except FileNotFoundError:
+        return {"error": "Not found"}, 404
+    except PermissionError:
+        return {"error": "Path escapes its share"}, 403
+
+    if is_root:
+        entries = [
+            {"name": name, "path": name, "is_dir": True, "size": 0}
+            for name in sorted(sftp_server._list_shares().keys(), key=str.lower)
+        ]
+        return {"path": "", "entries": entries}
+
+    if not os.path.isdir(real_path):
+        return {"error": "Not a folder"}, 404
+
+    try:
+        raw_entries = _scandir_entries_with_timeout(real_path)
+    except TimeoutError:
+        return {"error": f"Timed out reading {virtual_path} (unreachable network location?)"}, 504
+    except OSError as e:
+        return {"error": str(e)}, 500
+
+    raw_entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+    return {
+        "path": virtual_path,
+        "entries": [
+            {
+                "name": e["name"],
+                "path": virtual_path.rstrip("/") + "/" + e["name"],
+                "is_dir": e["is_dir"],
+                "size": e["size"]
+            }
+            for e in raw_entries
+        ]
+    }
+
+
+@app.route("/admin/sftp/remote/download", methods=["GET"])
+@jwt_required()
+def sftp_remote_download():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    virtual_path = (request.args.get("path") or "").strip()
+
+    try:
+        real_path, is_root = sftp_server._resolve_share_path(virtual_path)
+    except FileNotFoundError:
+        return {"error": "Not found"}, 404
+    except PermissionError:
+        return {"error": "Path escapes its share"}, 403
+
+    if is_root or not os.path.isfile(real_path):
+        return {"error": "Not a file"}, 404
+
+    return send_file(real_path, as_attachment=True, download_name=os.path.basename(real_path), conditional=True)
+
+
+@app.route("/admin/sftp/remote/upload", methods=["POST"])
+@jwt_required()
+def sftp_remote_upload():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    virtual_folder = (request.form.get("path") or "").strip()
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return {"error": "file is required"}, 400
+
+    try:
+        real_folder, is_root = sftp_server._resolve_share_path(virtual_folder)
+    except FileNotFoundError:
+        return {"error": "Not found"}, 404
+    except PermissionError:
+        return {"error": "Path escapes its share"}, 403
+
+    if is_root or not os.path.isdir(real_folder):
+        return {"error": "Choose a folder inside a share, not the share list itself"}, 400
+
+    safe_name = secure_filename(file.filename)
+    if not safe_name:
+        return {"error": "Invalid filename"}, 400
+
+    file.save(os.path.join(real_folder, safe_name))
+    return {"status": "uploaded", "name": safe_name}, 201
+
+
 @app.route("/admin/sftp/status", methods=["GET"])
 @jwt_required()
 def sftp_status():
