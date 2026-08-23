@@ -77,6 +77,11 @@ ALLOWED_RESUME_EXTENSIONS = {"pdf"}
 LOCAL_VIDEO_EXTENSIONS = {"mp4", "webm", "ogg", "mov", "mkv", "avi", "wmv", "m4v"}
 DEFAULT_LOCAL_VIDEO_FOLDER = r"C:\Videos"
 
+# Video Creator's downloads live in this subfolder of the local video folder.
+# Even though "special" users can otherwise browse the local video library,
+# this specific subtree is admin-only -- see local_video_access_allowed().
+VIDEO_RECORDINGS_DIRNAME = "VideoRecordings"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VAPID_PRIVATE_KEY_PATH = os.path.join(BASE_DIR, "vapid_private_key.pem")
 VAPID_PUBLIC_KEY_PATH = os.path.join(BASE_DIR, "vapid_public_key.txt")
@@ -3886,7 +3891,7 @@ def run_video_download(job_id, url):
     import yt_dlp
 
     local_video_folder = get_app_settings()["local_video_folder"]
-    recordings_root = os.path.join(local_video_folder, "VideoRecordings")
+    recordings_root = os.path.join(local_video_folder, VIDEO_RECORDINGS_DIRNAME)
 
     probe_opts = {
         "quiet": True, "no_warnings": True, "noplaylist": True, "socket_timeout": 30
@@ -4157,6 +4162,25 @@ def resolve_local_video_path(relpath):
         return None, base_dir
 
     return candidate, base_dir
+
+
+def _is_video_recordings_path(base_dir, path):
+    """True if the resolved `path` is Video Creator's VideoRecordings tree
+    (or something inside it), given the resolved local-video-folder `base_dir`."""
+    recordings_root = os.path.realpath(os.path.join(base_dir, VIDEO_RECORDINGS_DIRNAME))
+    path = os.path.realpath(path)
+    return path == recordings_root or path.startswith(recordings_root + os.sep)
+
+
+def local_video_access_allowed(base_dir, path):
+    """Local Folder browsing access, except Video Creator's VideoRecordings
+    tree, which is admin-only -- "special" users can browse everything else
+    under the local video folder, but not this."""
+    if not video_access_allowed():
+        return False
+    if _is_video_recordings_path(base_dir, path) and not admin_required():
+        return False
+    return True
 
 
 # --- SFTP share management ---------------------------------------------
@@ -4610,6 +4634,9 @@ def list_local_videos():
     if not target_dir or not os.path.isdir(target_dir):
         return {"error": "Folder not found", "folders": [], "videos": []}, 404
 
+    if not local_video_access_allowed(resolved_base, target_dir):
+        return {"error": "Video access required", "folders": [], "videos": []}, 403
+
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT source_path, status, output_filename, error_message FROM video_conversions")
@@ -4628,10 +4655,17 @@ def list_local_videos():
     except OSError as e:
         return {"error": str(e), "folders": [], "videos": []}, 500
 
+    is_admin = admin_required()
+
     for entry in entries:
         rel_path = os.path.relpath(entry.path, resolved_base).replace(os.sep, "/")
 
         if entry.is_dir():
+            # Hide Video Creator's admin-only folder from non-admins entirely
+            # -- not just blocked if opened, but absent from the listing.
+            if not is_admin and _is_video_recordings_path(resolved_base, entry.path):
+                continue
+
             folders.append({
                 "name": entry.name,
                 "path": rel_path
@@ -4943,6 +4977,9 @@ def convert_local_video():
     if not candidate or not os.path.isfile(candidate):
         return {"error": "File not found"}, 404
 
+    if not local_video_access_allowed(_base_dir, candidate):
+        return {"error": "Video access required"}, 403
+
     existing = get_conversion_status(relpath)
     if existing and existing["status"] in ("queued", "running", "done"):
         return {"message": "Conversion already queued or complete", "status": existing["status"]}
@@ -4962,6 +4999,13 @@ def convert_local_video_status():
 
     if not relpath:
         return {"error": "path is required"}, 400
+
+    candidate, base_dir = resolve_local_video_path(relpath)
+    if not candidate:
+        return {"error": "Invalid path"}, 403
+
+    if not local_video_access_allowed(base_dir, candidate):
+        return {"error": "Video access required"}, 403
 
     status = get_conversion_status(relpath)
 
