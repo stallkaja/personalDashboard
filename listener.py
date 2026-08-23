@@ -25,7 +25,9 @@ import os
 import uuid
 import math
 import json
+import re
 import requests
+import shutil
 import subprocess
 import threading
 import hashlib
@@ -478,7 +480,7 @@ def ensure_feature_tables():
             status VARCHAR(20) NOT NULL DEFAULT 'queued',
             title VARCHAR(255),
             error_message TEXT,
-            video_id INT,
+            relpath VARCHAR(1000),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_video_downloads_user (user_id)
@@ -686,7 +688,8 @@ def ensure_feature_tables():
         ("app_settings", "announcement", "TEXT"),
         ("users", "status", "VARCHAR(20) DEFAULT 'approved'"),
         ("users", "must_change_password", "BOOLEAN DEFAULT FALSE"),
-        ("users", "email", "VARCHAR(255)")
+        ("users", "email", "VARCHAR(255)"),
+        ("video_downloads", "relpath", "VARCHAR(1000)")
     ]:
         cursor.execute(f"""
             SELECT COUNT(*) FROM information_schema.columns
@@ -3839,50 +3842,88 @@ def delete_video_request(request_id):
 
 # --- Video Creator: fetch a video from a link (Reddit/v.redd.it, redgifs,
 # gfycat, imgur, YouTube, and hundreds of other sites yt-dlp already knows
-# how to extract from -- no per-site code needed here) and drop it straight
-# into the same `videos` table/library the manual upload form uses. Runs in
-# a background thread so the HTTP request returns immediately; the frontend
-# polls GET /video-downloads for progress. -----------------------------------
+# how to extract from -- no per-site code needed here). Saves straight into
+# the local video library's folder tree at
+#   <local_video_folder>\VideoRecordings\<Platform>\<Video Title>\<files>
+# (subtitles/thumbnail land in the same per-video folder) so it shows up in
+# the existing "Local Folder" browser/player/convert-to-mp4 pipeline with no
+# separate serving path of its own -- admin only, since it's a server-side
+# fetch-any-URL tool. Runs in a background thread so the HTTP request
+# returns immediately; the frontend polls GET /video-downloads for progress.
 YTDLP_MAX_FILESIZE = 2 * 1024 * 1024 * 1024  # 2 GB cap per download
 
+_UNSAFE_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
-def set_download_status(job_id, status, title=None, error_message=None, video_id=None):
+
+def _sanitize_path_component(name, fallback):
+    """Make a string safe to use as a single Windows folder/file name."""
+    name = _UNSAFE_PATH_CHARS.sub("_", (name or "").strip())
+    name = name.rstrip(" .")  # Windows disallows a trailing space or dot
+    name = name[:150]
+    return name or fallback
+
+
+def set_download_status(job_id, status, title=None, error_message=None, relpath=None):
     db = get_db()
     cursor = db.cursor()
     cursor.execute(
         """
         UPDATE video_downloads
         SET status=%s, title=COALESCE(%s, title), error_message=%s,
-            video_id=COALESCE(%s, video_id)
+            relpath=COALESCE(%s, relpath)
         WHERE id=%s
         """,
-        (status, title, error_message, video_id, job_id)
+        (status, title, error_message, relpath, job_id)
     )
     db.commit()
     cursor.close()
     db.close()
 
 
-def _cleanup_partial_download(stem):
-    try:
-        for name in os.listdir(VIDEO_UPLOAD_FOLDER):
-            if name.startswith(stem + "."):
-                try:
-                    os.remove(os.path.join(VIDEO_UPLOAD_FOLDER, name))
-                except OSError:
-                    pass
-    except OSError:
-        pass
-
-
-def run_video_download(job_id, url, user_id, caption, visibility):
+def run_video_download(job_id, url):
     set_download_status(job_id, "running")
 
     import yt_dlp
 
-    stem = uuid.uuid4().hex
+    local_video_folder = get_app_settings()["local_video_folder"]
+    recordings_root = os.path.join(local_video_folder, "VideoRecordings")
+
+    probe_opts = {
+        "quiet": True, "no_warnings": True, "noplaylist": True, "socket_timeout": 30
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        set_download_status(job_id, "failed", error_message=str(e)[:2000])
+        return
+
+    raw_title = (info or {}).get("title") or "video"
+    title = _sanitize_path_component(raw_title, "video")
+    platform = _sanitize_path_component(
+        (info or {}).get("extractor_key") or (info or {}).get("extractor"), "Other"
+    )
+
+    platform_dir = os.path.join(recordings_root, platform)
+
+    # Folder is named after the video's title; if that name is already taken
+    # by a (non-empty) folder -- a different video that happens to share a
+    # title -- fall back to "Title (2)", "Title (3)", etc.
+    candidate = title
+    counter = 2
+    while True:
+        existing = os.path.join(platform_dir, candidate)
+        if not (os.path.isdir(existing) and os.listdir(existing)):
+            break
+        candidate = f"{title} ({counter})"
+        counter += 1
+
+    target_dir = os.path.join(platform_dir, candidate)
+    os.makedirs(target_dir, exist_ok=True)
+
     ydl_opts = {
-        "outtmpl": os.path.join(VIDEO_UPLOAD_FOLDER, f"{stem}.%(ext)s"),
+        "outtmpl": os.path.join(target_dir, f"{candidate}.%(ext)s"),
         "format": "bv*+ba/b",
         "merge_output_format": "mp4",
         "ffmpeg_location": os.path.dirname(FFMPEG_BIN),
@@ -3892,45 +3933,33 @@ def run_video_download(job_id, url, user_id, caption, visibility):
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 3,
-        "restrictfilenames": True,
+        # Extra files alongside the video, when the site has them.
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": ["en"],
+        "writethumbnail": True,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            ydl.download([url])
     except Exception as e:
-        _cleanup_partial_download(stem)
+        shutil.rmtree(target_dir, ignore_errors=True)
         set_download_status(job_id, "failed", error_message=str(e)[:2000])
         return
 
-    title = (info.get("title") or "video").strip()[:255] if info else "video"
-
-    stored_name = next(
-        (n for n in os.listdir(VIDEO_UPLOAD_FOLDER) if n.startswith(stem + ".")), None
+    video_file = next(
+        (n for n in os.listdir(target_dir) if n.rsplit(".", 1)[-1].lower() in LOCAL_VIDEO_EXTENSIONS),
+        None
     )
 
-    if not stored_name:
-        set_download_status(job_id, "failed", error_message="Download completed but the output file was not found.")
+    if not video_file:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        set_download_status(job_id, "failed", error_message="Download completed but no video file was found in the output folder.")
         return
 
-    stored_path = os.path.join(VIDEO_UPLOAD_FOLDER, stored_name)
-    file_size = os.path.getsize(stored_path)
-
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute(
-        """
-        INSERT INTO videos (filename, original_name, caption, visibility, file_size, uploaded_by)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (stored_name, title, caption or title, visibility, file_size, user_id)
-    )
-    db.commit()
-    new_video_id = cursor.lastrowid
-    cursor.close()
-    db.close()
-
-    set_download_status(job_id, "done", title=title, video_id=new_video_id)
+    relpath = os.path.relpath(os.path.join(target_dir, video_file), local_video_folder).replace(os.sep, "/")
+    set_download_status(job_id, "done", title=raw_title[:255], relpath=relpath)
 
 
 _download_queue = queue.Queue()
@@ -3938,11 +3967,11 @@ _download_queue = queue.Queue()
 
 def _download_worker():
     while True:
-        job = _download_queue.get()
+        job_id, url = _download_queue.get()
         try:
-            run_video_download(*job)
+            run_video_download(job_id, url)
         except Exception as e:  # belt-and-suspenders -- never let the worker thread die
-            set_download_status(job[0], "failed", error_message=str(e)[:2000])
+            set_download_status(job_id, "failed", error_message=str(e)[:2000])
         finally:
             _download_queue.task_done()
 
@@ -3953,8 +3982,8 @@ threading.Thread(target=_download_worker, daemon=True).start()
 @app.route("/video-downloads", methods=["GET"])
 @jwt_required()
 def list_video_downloads():
-    if not video_access_allowed():
-        return {"error": "Video access required"}, 403
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
 
     claims = get_jwt()
     user_id = int(claims["sub"])
@@ -3963,12 +3992,10 @@ def list_video_downloads():
     cursor = db.cursor()
     cursor.execute(
         """
-        SELECT d.id, d.source_url, d.status, d.title, d.error_message, d.video_id,
-               d.created_at, v.filename
-        FROM video_downloads d
-        LEFT JOIN videos v ON v.id = d.video_id
-        WHERE d.user_id=%s
-        ORDER BY d.created_at DESC
+        SELECT id, source_url, status, title, error_message, relpath, created_at
+        FROM video_downloads
+        WHERE user_id=%s
+        ORDER BY created_at DESC
         LIMIT 20
         """,
         (user_id,)
@@ -3985,9 +4012,9 @@ def list_video_downloads():
                 "status": r[2],
                 "title": r[3],
                 "error_message": r[4],
-                "video_id": r[5],
+                "relpath": r[5],
                 "created_at": r[6].isoformat() if r[6] else None,
-                "video_url": f"/videos/file/{r[7]}" if r[7] else None
+                "video_url": f"/local-videos/file/{r[5]}?token={sign_video_ref(r[5])}" if r[5] else None
             }
             for r in rows
         ]
@@ -3997,8 +4024,8 @@ def list_video_downloads():
 @app.route("/video-downloads", methods=["POST"])
 @jwt_required()
 def create_video_download():
-    if not video_access_allowed():
-        return {"error": "Video access required"}, 403
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
 
     claims = get_jwt()
     user_id = int(claims["sub"])
@@ -4013,12 +4040,6 @@ def create_video_download():
     if len(url) > 1000:
         return {"error": "url is too long"}, 400
 
-    caption = (data.get("caption") or "").strip() or None
-
-    visibility = data.get("visibility") or "private"
-    if visibility not in ("private", "shared"):
-        visibility = "private"
-
     db = get_db()
     cursor = db.cursor()
     cursor.execute(
@@ -4030,7 +4051,7 @@ def create_video_download():
     cursor.close()
     db.close()
 
-    _download_queue.put((job_id, url, user_id, caption, visibility))
+    _download_queue.put((job_id, url))
 
     return {"id": job_id, "message": "Download queued"}, 202
 
@@ -4038,33 +4059,21 @@ def create_video_download():
 @app.route("/video-downloads/<int:job_id>", methods=["DELETE"])
 @jwt_required()
 def delete_video_download(job_id):
-    if not video_access_allowed():
-        return {"error": "Video access required"}, 403
-
-    claims = get_jwt()
-    user_id = int(claims["sub"])
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
 
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT user_id FROM video_downloads WHERE id=%s", (job_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        cursor.close()
-        db.close()
-        return {"error": "Download not found"}, 404
-
-    if row[0] != user_id and not admin_required():
-        cursor.close()
-        db.close()
-        return {"error": "You can only clear your own downloads"}, 403
-
     cursor.execute("DELETE FROM video_downloads WHERE id=%s", (job_id,))
     db.commit()
+    deleted = cursor.rowcount
     cursor.close()
     db.close()
 
-    return {"message": "Download entry cleared"}
+    if not deleted:
+        return {"error": "Download not found"}, 404
+
+    return {"message": "Download entry cleared"}  # clears the job row only, never the file on disk
 
 
 VIDEO_SOURCES = ("upload", "local")

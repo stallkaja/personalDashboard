@@ -198,9 +198,9 @@ function AppShell() {
             <Route
               path="/video-creator"
               element={
-                <VideoRoute>
+                <AdminRoute>
                   <VideoCreator />
-                </VideoRoute>
+                </AdminRoute>
               }
             />
 

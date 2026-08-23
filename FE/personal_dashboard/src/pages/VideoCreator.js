@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 import theme, { colors } from "../styles/theme";
@@ -16,13 +15,12 @@ export default function VideoCreator() {
   const { token } = useAuth();
 
   const [url, setUrl] = useState("");
-  const [caption, setCaption] = useState("");
-  const [visibility, setVisibility] = useState("private");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const [downloads, setDownloads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [nowPlaying, setNowPlaying] = useState(null);
 
   const loadDownloads = async () => {
     try {
@@ -71,7 +69,7 @@ export default function VideoCreator() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ url: trimmed, caption: caption.trim() || null, visibility })
+        body: JSON.stringify({ url: trimmed })
       });
 
       const data = await res.json().catch(() => ({}));
@@ -83,7 +81,6 @@ export default function VideoCreator() {
       }
 
       setUrl("");
-      setCaption("");
       setSubmitting(false);
       loadDownloads();
     } catch {
@@ -99,6 +96,7 @@ export default function VideoCreator() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDownloads((prev) => prev.filter((d) => d.id !== id));
+      setNowPlaying((prev) => (prev?.id === id ? null : prev));
     } catch {
       setError("Failed to clear that entry.");
     }
@@ -109,8 +107,10 @@ export default function VideoCreator() {
       <h1>🔗 Video Creator</h1>
       <p style={styles.muted}>
         Paste a link to a video -- Reddit/v.redd.it, redgifs, gfycat, imgur, YouTube, and most
-        other video sites are supported -- and it's downloaded and added to the{" "}
-        <Link to="/video-library" style={styles.inlineLink}>Video Library</Link>.
+        other video sites are supported. Each download is saved to{" "}
+        <code style={styles.code}>VideoRecordings\&lt;Platform&gt;\&lt;Video Title&gt;\</code>{" "}
+        under the local video library folder, along with subtitles/a thumbnail when the site
+        provides them.
       </p>
 
       {error && <div style={styles.error}>{error}</div>}
@@ -122,30 +122,27 @@ export default function VideoCreator() {
           placeholder="https://www.reddit.com/r/... or https://www.redgifs.com/watch/..."
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
         />
-
-        <label style={styles.label}>Caption (optional)</label>
-        <input
-          style={styles.input}
-          placeholder="Defaults to the video's title"
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-        />
-
-        <label style={styles.label}>Visibility</label>
-        <select
-          style={styles.input}
-          value={visibility}
-          onChange={(e) => setVisibility(e.target.value)}
-        >
-          <option value="private">Private — only visible to me</option>
-          <option value="shared">Shared — visible to everyone logged in</option>
-        </select>
 
         <button style={styles.button} onClick={submit} disabled={submitting}>
           {submitting ? "Queuing..." : "Fetch Video"}
         </button>
       </div>
+
+      {nowPlaying && (
+        <div style={styles.card}>
+          <video controls autoPlay style={styles.video} src={`${API_URL}${nowPlaying.video_url}`}>
+            Your browser does not support video playback.
+          </video>
+          <div style={styles.videoMeta}>
+            <strong>{nowPlaying.title}</strong>
+            <button style={styles.clearButton} onClick={() => setNowPlaying(null)}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={styles.card}>
         <h2>Recent Downloads</h2>
@@ -161,6 +158,9 @@ export default function VideoCreator() {
                 <div style={styles.rowMain}>
                   <div style={styles.rowTitle}>{d.title || d.source_url}</div>
                   <div style={styles.rowUrl}>{d.source_url}</div>
+                  {d.status === "done" && d.relpath && (
+                    <div style={styles.rowPath}>{d.relpath}</div>
+                  )}
                   {d.status === "failed" && d.error_message && (
                     <div style={styles.rowError} title={d.error_message}>
                       {d.error_message.length > 140
@@ -184,9 +184,9 @@ export default function VideoCreator() {
                   </span>
 
                   {d.status === "done" && d.video_url && (
-                    <Link to="/video-library" style={styles.playLink}>
-                      View in Library
-                    </Link>
+                    <button style={styles.button} onClick={() => setNowPlaying(d)}>
+                      ▶ Play
+                    </button>
                   )}
 
                   <button style={styles.clearButton} onClick={() => clearEntry(d.id)}>
@@ -214,8 +214,25 @@ const styles = {
     fontSize: 14,
     marginBottom: 12
   },
-  inlineLink: {
-    color: colors.primary
+  code: {
+    fontSize: 13,
+    background: colors.surfaceMuted,
+    padding: "1px 5px",
+    borderRadius: 4
+  },
+  video: {
+    width: "100%",
+    maxHeight: 480,
+    borderRadius: 8,
+    background: "#000",
+    display: "block"
+  },
+  videoMeta: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginTop: 10,
+    gap: 12
   },
   list: {
     display: "flex",
@@ -250,6 +267,14 @@ const styles = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap"
   },
+  rowPath: {
+    marginTop: 4,
+    fontSize: 12,
+    opacity: 0.5,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
+  },
   rowError: {
     marginTop: 6,
     fontSize: 12,
@@ -277,11 +302,6 @@ const styles = {
     fontSize: 13,
     color: colors.dangerSolid,
     fontWeight: "bold",
-    whiteSpace: "nowrap"
-  },
-  playLink: {
-    fontSize: 13,
-    color: colors.primary,
     whiteSpace: "nowrap"
   },
   clearButton: {
