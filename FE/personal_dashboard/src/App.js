@@ -36,6 +36,7 @@ import News from "./pages/News";
 import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
+import VideoCreator from "./pages/VideoCreator";
 import Communication from "./pages/Communication";
 import VideoCall from "./pages/VideoCall";
 import DatabaseManager from "./pages/DatabaseManager";
@@ -190,6 +191,15 @@ function AppShell() {
               element={
                 <VideoRoute>
                   <VideoLibrary />
+                </VideoRoute>
+              }
+            />
+
+            <Route
+              path="/video-creator"
+              element={
+                <VideoRoute>
+                  <VideoCreator />
                 </VideoRoute>
               }
             />

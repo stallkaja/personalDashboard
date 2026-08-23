@@ -28,3 +28,12 @@ python-socketio==5.16.3
 python-engineio==4.13.2
 simple-websocket==1.1.0
 bidict==0.23.1
+
+# Video Creator (download-from-link tool, /video-downloads). yt-dlp already
+# knows how to extract from YouTube, Reddit/v.redd.it, redgifs, gfycat,
+# imgur, Pornhub, and hundreds of other sites -- no per-site code needed.
+# It shells out to the ffmpeg/ffprobe binaries already configured via
+# FFMPEG_BIN/FFPROBE_BIN in listener.py to mux/merge separate video+audio
+# streams (e.g. v.redd.it). Update often -- sites change frequently and an
+# old yt-dlp breaks first: python -m pip install -U yt-dlp
+yt-dlp>=2025.1.1

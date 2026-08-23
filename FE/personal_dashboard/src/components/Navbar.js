@@ -60,6 +60,7 @@ export default function Navbar() {
   const links = [
     ...LINKS,
     ...(canVideos ? [{ to: "/video-library", label: "Videos", icon: "🎬" }] : []),
+    ...(canVideos ? [{ to: "/video-creator", label: "Video Creator", icon: "🔗" }] : []),
     ...(user?.role === "admin" ? [{ to: "/admin", label: "Admin", icon: "🛠️" }] : [])
   ];
 

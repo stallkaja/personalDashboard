@@ -471,6 +471,21 @@ def ensure_feature_tables():
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS video_downloads (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            source_url VARCHAR(1000) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'queued',
+            title VARCHAR(255),
+            error_message TEXT,
+            video_id INT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_video_downloads_user (user_id)
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS resumes (
             id INT AUTO_INCREMENT PRIMARY KEY,
             filename VARCHAR(255) NOT NULL,
@@ -3820,6 +3835,236 @@ def delete_video_request(request_id):
     db.close()
 
     return {"message": "Request deleted"}
+
+
+# --- Video Creator: fetch a video from a link (Reddit/v.redd.it, redgifs,
+# gfycat, imgur, YouTube, and hundreds of other sites yt-dlp already knows
+# how to extract from -- no per-site code needed here) and drop it straight
+# into the same `videos` table/library the manual upload form uses. Runs in
+# a background thread so the HTTP request returns immediately; the frontend
+# polls GET /video-downloads for progress. -----------------------------------
+YTDLP_MAX_FILESIZE = 2 * 1024 * 1024 * 1024  # 2 GB cap per download
+
+
+def set_download_status(job_id, status, title=None, error_message=None, video_id=None):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        UPDATE video_downloads
+        SET status=%s, title=COALESCE(%s, title), error_message=%s,
+            video_id=COALESCE(%s, video_id)
+        WHERE id=%s
+        """,
+        (status, title, error_message, video_id, job_id)
+    )
+    db.commit()
+    cursor.close()
+    db.close()
+
+
+def _cleanup_partial_download(stem):
+    try:
+        for name in os.listdir(VIDEO_UPLOAD_FOLDER):
+            if name.startswith(stem + "."):
+                try:
+                    os.remove(os.path.join(VIDEO_UPLOAD_FOLDER, name))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def run_video_download(job_id, url, user_id, caption, visibility):
+    set_download_status(job_id, "running")
+
+    import yt_dlp
+
+    stem = uuid.uuid4().hex
+    ydl_opts = {
+        "outtmpl": os.path.join(VIDEO_UPLOAD_FOLDER, f"{stem}.%(ext)s"),
+        "format": "bv*+ba/b",
+        "merge_output_format": "mp4",
+        "ffmpeg_location": os.path.dirname(FFMPEG_BIN),
+        "noplaylist": True,
+        "max_filesize": YTDLP_MAX_FILESIZE,
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 30,
+        "retries": 3,
+        "restrictfilenames": True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as e:
+        _cleanup_partial_download(stem)
+        set_download_status(job_id, "failed", error_message=str(e)[:2000])
+        return
+
+    title = (info.get("title") or "video").strip()[:255] if info else "video"
+
+    stored_name = next(
+        (n for n in os.listdir(VIDEO_UPLOAD_FOLDER) if n.startswith(stem + ".")), None
+    )
+
+    if not stored_name:
+        set_download_status(job_id, "failed", error_message="Download completed but the output file was not found.")
+        return
+
+    stored_path = os.path.join(VIDEO_UPLOAD_FOLDER, stored_name)
+    file_size = os.path.getsize(stored_path)
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        INSERT INTO videos (filename, original_name, caption, visibility, file_size, uploaded_by)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (stored_name, title, caption or title, visibility, file_size, user_id)
+    )
+    db.commit()
+    new_video_id = cursor.lastrowid
+    cursor.close()
+    db.close()
+
+    set_download_status(job_id, "done", title=title, video_id=new_video_id)
+
+
+_download_queue = queue.Queue()
+
+
+def _download_worker():
+    while True:
+        job = _download_queue.get()
+        try:
+            run_video_download(*job)
+        except Exception as e:  # belt-and-suspenders -- never let the worker thread die
+            set_download_status(job[0], "failed", error_message=str(e)[:2000])
+        finally:
+            _download_queue.task_done()
+
+
+threading.Thread(target=_download_worker, daemon=True).start()
+
+
+@app.route("/video-downloads", methods=["GET"])
+@jwt_required()
+def list_video_downloads():
+    if not video_access_allowed():
+        return {"error": "Video access required"}, 403
+
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        """
+        SELECT d.id, d.source_url, d.status, d.title, d.error_message, d.video_id,
+               d.created_at, v.filename
+        FROM video_downloads d
+        LEFT JOIN videos v ON v.id = d.video_id
+        WHERE d.user_id=%s
+        ORDER BY d.created_at DESC
+        LIMIT 20
+        """,
+        (user_id,)
+    )
+    rows = cursor.fetchall()
+    cursor.close()
+    db.close()
+
+    return {
+        "downloads": [
+            {
+                "id": r[0],
+                "source_url": r[1],
+                "status": r[2],
+                "title": r[3],
+                "error_message": r[4],
+                "video_id": r[5],
+                "created_at": r[6].isoformat() if r[6] else None,
+                "video_url": f"/videos/file/{r[7]}" if r[7] else None
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.route("/video-downloads", methods=["POST"])
+@jwt_required()
+def create_video_download():
+    if not video_access_allowed():
+        return {"error": "Video access required"}, 403
+
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    data = request.json or {}
+    url = (data.get("url") or "").strip()
+
+    if not url:
+        return {"error": "url is required"}, 400
+    if not url.lower().startswith(("http://", "https://")):
+        return {"error": "url must be a valid http(s) link"}, 400
+    if len(url) > 1000:
+        return {"error": "url is too long"}, 400
+
+    caption = (data.get("caption") or "").strip() or None
+
+    visibility = data.get("visibility") or "private"
+    if visibility not in ("private", "shared"):
+        visibility = "private"
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "INSERT INTO video_downloads (user_id, source_url, status) VALUES (%s, %s, 'queued')",
+        (user_id, url)
+    )
+    db.commit()
+    job_id = cursor.lastrowid
+    cursor.close()
+    db.close()
+
+    _download_queue.put((job_id, url, user_id, caption, visibility))
+
+    return {"id": job_id, "message": "Download queued"}, 202
+
+
+@app.route("/video-downloads/<int:job_id>", methods=["DELETE"])
+@jwt_required()
+def delete_video_download(job_id):
+    if not video_access_allowed():
+        return {"error": "Video access required"}, 403
+
+    claims = get_jwt()
+    user_id = int(claims["sub"])
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT user_id FROM video_downloads WHERE id=%s", (job_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor.close()
+        db.close()
+        return {"error": "Download not found"}, 404
+
+    if row[0] != user_id and not admin_required():
+        cursor.close()
+        db.close()
+        return {"error": "You can only clear your own downloads"}, 403
+
+    cursor.execute("DELETE FROM video_downloads WHERE id=%s", (job_id,))
+    db.commit()
+    cursor.close()
+    db.close()
+
+    return {"message": "Download entry cleared"}
 
 
 VIDEO_SOURCES = ("upload", "local")
