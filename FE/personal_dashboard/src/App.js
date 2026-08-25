@@ -37,6 +37,7 @@ import ShoppingList from "./pages/ShoppingList";
 import PhotoGallery from "./pages/PhotoGallery";
 import VideoLibrary from "./pages/VideoLibrary";
 import VideoCreator from "./pages/VideoCreator";
+import IcarusServers from "./pages/IcarusServers";
 import Communication from "./pages/Communication";
 import VideoCall from "./pages/VideoCall";
 import DatabaseManager from "./pages/DatabaseManager";
@@ -200,6 +201,15 @@ function AppShell() {
               element={
                 <AdminRoute>
                   <VideoCreator />
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/icarus-servers"
+              element={
+                <AdminRoute>
+                  <IcarusServers />
                 </AdminRoute>
               }
             />

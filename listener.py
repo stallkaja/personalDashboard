@@ -20,6 +20,7 @@ from pywebpush import webpush, WebPushException
 import base64
 import bcrypt
 import concurrent.futures
+import configparser
 import mysql.connector
 import os
 import uuid
@@ -4079,6 +4080,243 @@ def delete_video_download(job_id):
         return {"error": "Download not found"}, 404
 
     return {"message": "Download entry cleared"}  # clears the job row only, never the file on disk
+
+
+# --- Icarus dedicated server control -----------------------------------
+# 4 independent Icarus Dedicated Server installs, each cloned from a
+# singleplayer save and living entirely on this host at
+# D:\IcarusServers\<name> (own port pair, own ServerSettings.ini with
+# LoadProspect/admin+join passwords already set, own Launch_<name>.bat --
+# see the ICARUS_SERVERS map below for exact ports). Admin-only: this
+# spawns/kills real processes on the host machine.
+#
+# Process tracking survives a backend restart by writing {pid, started_at}
+# to a small state file inside each instance's own folder; liveness is then
+# re-verified with `tasklist` rather than trusted blindly, since a stale pid
+# could have been reused by an unrelated process after a reboot.
+ICARUS_SERVERS_ROOT = r"D:\IcarusServers"
+
+ICARUS_SERVERS = {
+    "Elysium01": {"label": "Elysium", "port": 17777, "query_port": 27015},
+    "OlympusStallkaj": {"label": "Olympus (Stallkaj)", "port": 17778, "query_port": 27016},
+    "StallkajStyx": {"label": "Styx (Stallkaj)", "port": 17779, "query_port": 27017},
+    "Prometheus01": {"label": "Prometheus", "port": 17780, "query_port": 27018},
+}
+
+_icarus_procs = {}  # name -> subprocess.Popen, valid for this backend process's lifetime
+_icarus_lock = threading.Lock()
+
+
+def _icarus_dir(name):
+    return os.path.join(ICARUS_SERVERS_ROOT, name)
+
+
+def _icarus_state_file(name):
+    return os.path.join(_icarus_dir(name), "_control_state.json")
+
+
+def _icarus_write_state(name, pid):
+    try:
+        with open(_icarus_state_file(name), "w", encoding="utf-8") as f:
+            json.dump({"pid": pid, "started_at": datetime.now(timezone.utc).isoformat()}, f)
+    except OSError:
+        pass
+
+
+def _icarus_read_state(name):
+    try:
+        with open(_icarus_state_file(name), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _icarus_clear_state(name):
+    try:
+        os.remove(_icarus_state_file(name))
+    except OSError:
+        pass
+
+
+def _pid_alive(pid):
+    """Ask Windows directly rather than trusting our own bookkeeping -- the
+    backend may have restarted since we wrote the pid to disk."""
+    if not pid:
+        return False
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"],
+            capture_output=True, text=True, timeout=5
+        )
+        return str(pid) in result.stdout
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def _icarus_settings(name):
+    """Read the instance's live ServerSettings.ini so the UI always reflects
+    reality even if someone hand-edits the file."""
+    ini_path = os.path.join(
+        _icarus_dir(name), "Icarus", "Saved", "Config", "WindowsServer", "ServerSettings.ini"
+    )
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(ini_path, encoding="utf-8")
+        section = parser["/Script/Icarus.DedicatedServerSettings"]
+    except (OSError, KeyError):
+        return {"max_players": None, "join_password": None, "admin_password": None}
+    return {
+        "max_players": section.get("MaxPlayers", "") or None,
+        "join_password": section.get("JoinPassword", "") or None,
+        "admin_password": section.get("AdminPassword", "") or None,
+    }
+
+
+def _icarus_log_tail(name, max_lines=30):
+    log_path = os.path.join(_icarus_dir(name), "Icarus", "Saved", "Logs", "Icarus.log")
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = remaining = f.tell()
+            chunk = 8192
+            data = b""
+            while remaining > 0 and data.count(b"\n") <= max_lines:
+                step = min(chunk, remaining)
+                remaining -= step
+                f.seek(remaining)
+                data = f.read(step) + data
+            text = data.decode("utf-8", errors="replace")
+            return text.splitlines()[-max_lines:]
+    except OSError:
+        return []
+
+
+def _icarus_status(name):
+    """Fast path: a Popen we started this process still handles. Slow path
+    (e.g. after a backend restart): fall back to the on-disk pid and confirm
+    it's still alive before trusting it."""
+    proc = _icarus_procs.get(name)
+    pid = None
+
+    if proc is not None:
+        if proc.poll() is None:
+            pid = proc.pid
+        else:
+            with _icarus_lock:
+                _icarus_procs.pop(name, None)
+            _icarus_clear_state(name)
+
+    if pid is None:
+        state = _icarus_read_state(name)
+        candidate = state.get("pid") if state else None
+        if candidate and _pid_alive(candidate):
+            pid = candidate
+        elif state:
+            _icarus_clear_state(name)
+
+    started_at = None
+    if pid:
+        state = _icarus_read_state(name)
+        started_at = state.get("started_at") if state else None
+
+    return {"running": bool(pid), "pid": pid, "started_at": started_at}
+
+
+@app.route("/icarus-servers", methods=["GET"])
+@jwt_required()
+def list_icarus_servers():
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+
+    servers = []
+    for name, cfg in ICARUS_SERVERS.items():
+        status = _icarus_status(name)
+        settings = _icarus_settings(name)
+        servers.append({
+            "name": name,
+            "label": cfg["label"],
+            "port": cfg["port"],
+            "query_port": cfg["query_port"],
+            "installed": os.path.isfile(os.path.join(_icarus_dir(name), "IcarusServer.exe")),
+            **status,
+            **settings,
+            "log_tail": _icarus_log_tail(name) if status["running"] else []
+        })
+
+    return {"servers": servers}
+
+
+@app.route("/icarus-servers/<name>/start", methods=["POST"])
+@jwt_required()
+def start_icarus_server(name):
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+    if name not in ICARUS_SERVERS:
+        return {"error": "Unknown server"}, 404
+
+    if _icarus_status(name)["running"]:
+        return {"error": "Server is already running"}, 409
+
+    instance_dir = _icarus_dir(name)
+    exe = os.path.join(instance_dir, "IcarusServer.exe")
+    if not os.path.isfile(exe):
+        return {"error": f"Server executable not found at {exe}"}, 500
+
+    cfg = ICARUS_SERVERS[name]
+    args = [
+        exe, "-log",
+        f"-PORT={cfg['port']}",
+        f"-QueryPort={cfg['query_port']}",
+        f"-SteamServerName={cfg['label']} Dedicated Server"
+    ]
+    # Detached + no window: this runs under the dashboard's own service
+    # session, which has no desktop to draw a console on anyway.
+    flags = (
+        getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+
+    try:
+        proc = subprocess.Popen(args, cwd=instance_dir, creationflags=flags, close_fds=True)
+    except OSError as e:
+        return {"error": f"Failed to start: {e}"}, 500
+
+    with _icarus_lock:
+        _icarus_procs[name] = proc
+    _icarus_write_state(name, proc.pid)
+
+    return {"message": f"{cfg['label']} starting", "pid": proc.pid}, 202
+
+
+@app.route("/icarus-servers/<name>/stop", methods=["POST"])
+@jwt_required()
+def stop_icarus_server(name):
+    if not admin_required():
+        return {"error": "Admin access required"}, 403
+    if name not in ICARUS_SERVERS:
+        return {"error": "Unknown server"}, 404
+
+    status = _icarus_status(name)
+    if not status["running"]:
+        return {"error": "Server is not running"}, 409
+
+    # /T kills the whole process tree -- IcarusServer.exe is a thin launcher
+    # for IcarusServer-Win64-Shipping.exe, and only killing the parent would
+    # leave the actual game server running orphaned.
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(status["pid"]), "/T", "/F"],
+            capture_output=True, text=True, timeout=15
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        return {"error": f"Failed to stop: {e}"}, 500
+
+    with _icarus_lock:
+        _icarus_procs.pop(name, None)
+    _icarus_clear_state(name)
+
+    return {"message": f"{ICARUS_SERVERS[name]['label']} stopped"}
 
 
 VIDEO_SOURCES = ("upload", "local")

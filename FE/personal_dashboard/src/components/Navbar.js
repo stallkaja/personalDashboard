@@ -61,6 +61,7 @@ export default function Navbar() {
     ...LINKS,
     ...(canVideos ? [{ to: "/video-library", label: "Videos", icon: "🎬" }] : []),
     ...(user?.role === "admin" ? [{ to: "/video-creator", label: "Video Creator", icon: "🔗" }] : []),
+    ...(user?.role === "admin" ? [{ to: "/icarus-servers", label: "Icarus Servers", icon: "🛰️" }] : []),
     ...(user?.role === "admin" ? [{ to: "/admin", label: "Admin", icon: "🛠️" }] : [])
   ];
 
