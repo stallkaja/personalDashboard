@@ -8,4 +8,5 @@ __pycache__/
 vapid_private_key.pem
 sftp_host_key.pem
 secrets.json
+icarus_agent_secrets.json
 deploy-target.local
