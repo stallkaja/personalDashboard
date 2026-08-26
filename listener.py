@@ -4358,28 +4358,40 @@ def remove_sftp_share(share_id):
 
 
 def _list_drive_letters_with_timeout(timeout_seconds=1.5):
-    """List existing drive letters, but never let a single stale/unreachable
-    one (e.g. a mapped network drive whose target is offline — os.path.exists
-    on a dead UNC-backed drive letter can hang for a long time on Windows)
-    stall the whole request. Whatever hasn't answered within timeout_seconds
-    is just skipped; its background thread is abandoned rather than waited on.
+    """List drive letters currently assigned on this Windows machine.
+
+    This used to check each of A-Z with os.path.exists() in a fresh
+    26-thread pool per call (bounded to timeout_seconds). The bug: a drive
+    letter mapped to an unreachable network location (e.g. a disconnected
+    NAS share) makes os.path.exists() hang indefinitely, and Python cannot
+    forcibly kill a thread stuck in that hung syscall --
+    ThreadPoolExecutor.shutdown(wait=False) only stops *waiting* for it, it
+    doesn't reclaim it. Every browse call against such a drive leaked one
+    more permanently-blocked OS thread; enough of them (this tab getting
+    opened/retried repeatedly) and the process ran out of threads, which is
+    exactly what made this endpoint fail outright ("network error") instead
+    of just being slow.
+
+    GetLogicalDrives() is a single, instant, metadata-only Win32 call — it
+    reports which drive letters are currently assigned without touching any
+    drive's filesystem at all, so there is nothing to hang on and nothing to
+    leak. timeout_seconds is kept for signature compatibility but unused.
     """
-    import string
-    candidates = [f"{d}:\\" for d in string.ascii_uppercase]
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(candidates))
-    futures = {pool.submit(os.path.exists, c): c for c in candidates}
-    done, _pending = concurrent.futures.wait(futures.keys(), timeout=timeout_seconds)
+    import ctypes
+    mask = ctypes.windll.kernel32.GetLogicalDrives()
+    return sorted(f"{chr(ord('A') + i)}:\\" for i in range(26) if mask & (1 << i))
 
-    drives = []
-    for future in done:
-        try:
-            if future.result():
-                drives.append(futures[future])
-        except Exception:
-            continue
 
-    pool.shutdown(wait=False)  # let any still-hung workers die in the background
-    return sorted(drives)
+# Shared, persistent pool for the scandir-with-timeout helpers below. A fresh
+# ThreadPoolExecutor().shutdown(wait=False) per call (the old approach) can't
+# kill a thread that's stuck in a hung blocking syscall (e.g. scandir() on a
+# dead network path) — it just abandons it, leaking one never-reclaimed OS
+# thread per hung call, unbounded. Reusing one small fixed-size pool instead
+# caps how many such threads can ever pile up: once every worker is
+# permanently stuck, later calls still fail cleanly via the .result(timeout=)
+# below (predictable "timed out" error) rather than the process slowly
+# running out of threads.
+_FS_SCAN_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="fs-scan")
 
 
 def _scandir_folders_with_timeout(path, timeout_seconds=5):
@@ -4396,15 +4408,11 @@ def _scandir_folders_with_timeout(path, timeout_seconds=5):
                 continue  # skip entries we can't stat (e.g. System Volume Information)
         return names
 
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(_do_scan)
+    future = _FS_SCAN_POOL.submit(_do_scan)
     try:
-        result = future.result(timeout=timeout_seconds)
+        return future.result(timeout=timeout_seconds)
     except concurrent.futures.TimeoutError:
-        pool.shutdown(wait=False)  # don't block the request on the stuck worker
         raise TimeoutError(f"scandir timed out for {path}")
-    pool.shutdown(wait=False)
-    return result
 
 
 @app.route("/admin/sftp/authorized-keys", methods=["GET"])
@@ -4549,15 +4557,11 @@ def _scandir_entries_with_timeout(path, timeout_seconds=5):
                 continue
         return out
 
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(_do_scan)
+    future = _FS_SCAN_POOL.submit(_do_scan)
     try:
-        result = future.result(timeout=timeout_seconds)
+        return future.result(timeout=timeout_seconds)
     except concurrent.futures.TimeoutError:
-        pool.shutdown(wait=False)
         raise TimeoutError(f"scandir timed out for {path}")
-    pool.shutdown(wait=False)
-    return result
 
 
 # --- SFTP file transfer (browser <-> host, within configured shares) -------

@@ -28,6 +28,7 @@ export default function SftpShares({ token }) {
   const [selectedFolder, setSelectedFolder] = useState(null); // {name, path}
   const [newShareName, setNewShareName] = useState("");
   const [adding, setAdding] = useState(false);
+  const [manualPath, setManualPath] = useState("");
 
   const [copied, setCopied] = useState(false);
 
@@ -161,6 +162,13 @@ export default function SftpShares({ token }) {
   const selectFolder = (folder) => {
     setSelectedFolder(folder);
     setNewShareName(folder.name.replace(/[:\\]/g, "") || folder.name);
+  };
+
+  const applyManualPath = () => {
+    const path = manualPath.trim();
+    if (!path) return;
+    const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+    selectFolder({ name, path });
   };
 
   const addShare = async () => {
@@ -311,6 +319,18 @@ export default function SftpShares({ token }) {
             {pathHistory.length > 0 && (
               <button style={styles.smallButton} onClick={goBack}>← Back</button>
             )}
+          </div>
+          <div style={styles.manualPathRow}>
+            <input
+              style={{ ...theme.input, marginBottom: 0 }}
+              placeholder={"Or type a path directly, e.g. D:\\Shared"}
+              value={manualPath}
+              onChange={(e) => setManualPath(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyManualPath()}
+            />
+            <button style={styles.smallButton} disabled={!manualPath.trim()} onClick={applyManualPath}>
+              Use path
+            </button>
           </div>
           <div style={styles.breadcrumb}>{browsePath || "This PC"}</div>
           {browseError && <div style={theme.error}>{browseError}</div>}
@@ -511,6 +531,11 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 8
+  },
+  manualPathRow: {
+    display: "flex",
+    gap: 8,
     marginBottom: 8
   },
   breadcrumb: {
