@@ -41,6 +41,8 @@ import IcarusServers from "./pages/IcarusServers";
 import Communication from "./pages/Communication";
 import VideoCall from "./pages/VideoCall";
 import DatabaseManager from "./pages/DatabaseManager";
+import Wikis from "./pages/Wikis";
+import WikiViewer from "./pages/WikiViewer";
 
 function AppShell() {
   const isMobile = useIsMobile();
@@ -211,6 +213,24 @@ function AppShell() {
                 <AdminRoute>
                   <IcarusServers />
                 </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/wikis"
+              element={
+                <ProtectedRoute>
+                  <Wikis />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/wikis/:wikiId"
+              element={
+                <ProtectedRoute>
+                  <WikiViewer />
+                </ProtectedRoute>
               }
             />
 

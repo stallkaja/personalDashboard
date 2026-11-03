@@ -37,6 +37,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 import sftp_server
+import wikis_api
 
 
 def _load_secrets():
@@ -7156,8 +7157,13 @@ def _log_request_error(e):
     return {"error": "Internal server error"}, 500
 
 
+# Wikis section (document store + AI chat relay for wiki pages) — see wikis_api.py
+wikis_api.init_wikis(app, get_db, _secret)
+
+
 if __name__ == "__main__":
     ensure_feature_tables()
+    wikis_api.ensure_wiki_tables()
     _error_logger.info("Backend started.")
 
     print("Registered routes:")

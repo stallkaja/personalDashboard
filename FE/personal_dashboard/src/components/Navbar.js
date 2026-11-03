@@ -13,6 +13,7 @@ const LINKS = [
   { to: "/calendar", label: "Calendar", icon: "📅" },
   { to: "/shopping-list", label: "Shopping List", icon: "🛒" },
   { to: "/photo-gallery", label: "Photos", icon: "🖼️" },
+  { to: "/wikis", label: "Wikis", icon: "📚" },
   { to: "/communication", label: "Messages", icon: "💬" },
   { to: "/video-call", label: "Video Call", icon: "📹" }
 ];

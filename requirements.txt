@@ -37,3 +37,7 @@ bidict==0.23.1
 # streams (e.g. v.redd.it). Update often -- sites change frequently and an
 # old yt-dlp breaks first: python -m pip install -U yt-dlp
 yt-dlp>=2025.1.1
+
+# Wikis section AI helper (wikis_api.py). Used only when ANTHROPIC_API_KEY is
+# set in secrets.json; otherwise the helper falls back to the local Ollama model.
+anthropic==2.4.0

@@ -19,6 +19,24 @@
       ]
     },
     {
+      "source": "wiki-apps/**/*.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
+      ]
+    },
+    {
+      "source": "wiki-apps/*.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
+      ]
+    },
+    {
+      "source": "wiki-apps/**/data/*.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
+      ]
+    },
+    {
       "source": "static/**",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
